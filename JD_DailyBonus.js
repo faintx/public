@@ -125,7 +125,7 @@ var merge = {};
 
 var KEY = '';
 
-// TODO 精简任务
+// TODO 精简任务 half
 async function all(cookie, jrBody) {
   KEY = cookie;
   merge = {};

@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.0.1"
+sh_ver="1.0.2"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -1295,6 +1295,32 @@ add_swapfile() {
     do_swap ${swapgb}
 }
 
+Update_Shell() {
+    echo -e "当前版本为 [ ${sh_ver} ]，开始检测最新版本..."
+    sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'sh_ver="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
+    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu
+    if [[ ${sh_new_ver} != ${sh_ver} ]]; then
+        echo -e "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
+        read -p "(默认：y)：" yn
+        [[ -z "${yn}" ]] && yn="y"
+        if [[ ${yn} == [Yy] ]]; then
+            curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && chmod +x syssetup.sh
+            echo -e "脚本已更新为最新版本[ ${sh_new_ver} ]！"
+            echo -e "3s后执行新脚本"
+            sleep 3s
+            bash syssetup.sh
+        else
+            echo && echo "	已取消..." && echo
+            sleep 3s
+            Start_Menu
+        fi
+    else
+        echo -e "当前已是最新版本[ ${sh_new_ver} ] ！"
+        sleep 3s
+        Start_Menu
+    fi
+}
+
 Start_Menu() {
     clear
     check_root
@@ -1325,7 +1351,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         read -e -p "(请输入序号)：" num
         case "${num}" in
         1)
-            echo
+            Update_Shell
             ;;
         2)
             add_swapfile

@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.1.3"
+sh_ver="1.1.4"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -395,8 +395,8 @@ ins_python() {
             sudo ldconfig
             rm -f Python-${PYTHON_VER}.tgz
 
-            ln -fs ${pythondir}/bin/python${dir} /usr/bin/python${pv}
-            ln -fs ${pythondir}/bin/pip${dir} /usr/bin/pip${pv}
+            ln -fs "${pythondir}/bin/python${dir}" /usr/bin/python${pv}
+            ln -fs "${pythondir}/bin/pip${dir}" /usr/bin/pip${pv}
         fi
     fi
 

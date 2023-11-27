@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.1.4"
+sh_ver="1.1.5"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -98,6 +98,9 @@ change_repo() {
 
     case "$(_os)" in
     centos)
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
         mv /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.backup
         if [ -n "$(_os_ver)" ]; then
             if [ "$(_os_ver)" -eq 7 ]; then
@@ -113,8 +116,8 @@ change_repo() {
             fi
 
             if [[ $? -eq 0 ]]; then
-                mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
-                mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
+                #mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
+                #mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
                 yum clean all && yum makecache
                 yum update -y
             else

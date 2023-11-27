@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.0.2"
+sh_ver="1.1.3"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -12,6 +12,9 @@ CONF="/etc/ss-rust/config.json"
 Now_ssrust_ver_File="/etc/ss-rust/ssrust_ver.txt"
 Now_v2ray_ver_File="/etc/ss-rust/v2ray_ver.txt"
 Local="/etc/sysctl.d/local.conf"
+kms_file="/usr/bin/vlmcsd"
+kms_pid="/var/run/vlmcsd.pid"
+Now_kms_ver_File="/var/run/vlmcsd_ver.txt"
 
 Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m" && Yellow_font_prefix="\033[0;33m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
@@ -590,11 +593,11 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
     esac
 }
 
-check_installed_status() {
+check_ssrust_installed() {
     [[ ! -e ${SSRUST_FILE} ]] && echo -e "${Error} Shadowsocks Rust 没有安装，请检查！" && setup_ssrust && return
 }
 
-check_status() {
+check_ssrust_status() {
     status=$(systemctl status ss-rust | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
 }
 
@@ -900,8 +903,7 @@ v2ray_Download() {
 }
 
 ssrust_Service() {
-    echo "
-[Unit]
+    echo "[Unit]
 Description= Shadowsocks Rust Service
 After=network-online.target
 Wants=network-online.target systemd-networkd-wait-online.service
@@ -913,7 +915,8 @@ ExecStartPre=/bin/sh -c 'ulimit -n 51200'
 ExecStart=${SSRUST_FILE} -c ${CONF}
 [Install]
 WantedBy=multi-user.target" >/etc/systemd/system/ss-rust.service
-    systemctl enable --now ss-rust
+    systemctl daemon-reload
+    systemctl enable ss-rust
     echo -e "${Info} Shadowsocks Rust 服务配置完成！"
 }
 
@@ -934,19 +937,19 @@ EOF
 }
 
 Start_ssrust() {
-    check_installed_status
-    check_status
+    check_ssrust_installed
+    check_ssrust_status
     [[ "$status" == "running" ]] && echo -e "${Info} Shadowsocks Rust 已在运行 ！" && setup_ssrust && return
     systemctl start ss-rust
-    check_status
+    check_ssrust_status
     [[ "$status" == "running" ]] && echo -e "${Info} Shadowsocks Rust 启动成功 ！"
     sleep 3s
     setup_ssrust
 }
 
 Stop_ssrust() {
-    check_installed_status
-    check_status
+    check_ssrust_installed
+    check_ssrust_status
     [[ !"$status" == "running" ]] && echo -e "${Error} Shadowsocks Rust 没有运行，请检查！" && setup_ssrust && return
     systemctl stop ss-rust
     sleep 3s
@@ -954,7 +957,7 @@ Stop_ssrust() {
 }
 
 Restart_ssrust() {
-    check_installed_status
+    check_ssrust_installed
     systemctl restart ss-rust
     echo -e "${Info} Shadowsocks Rust 重启完毕 ！"
     sleep 3s
@@ -999,7 +1002,7 @@ check_ver_comparison() {
         read -e -p "是否更新 ？ [Y/n]：" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ $yn == [Yy] ]]; then
-            check_status
+            check_ssrust_status
             [[ "$status" == "running" ]] && systemctl stop ss-rust
             #\cp "${CONF}" "/tmp/config.json"
             # rm -rf ${FOLDER}
@@ -1018,7 +1021,7 @@ check_ver_comparison() {
         read -e -p "是否更新 ？ [Y/n]：" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ $yn == [Yy] ]]; then
-            check_status
+            check_ssrust_status
             [[ "$status" == "running" ]] && systemctl stop ss-rust
             v2ray_Download
             need_restart=true
@@ -1033,7 +1036,7 @@ check_ver_comparison() {
 }
 
 update_ssrust() {
-    check_installed_status
+    check_ssrust_installed
     check_ver_comparison
     echo -e "${Info} Shadowsocks Rust 更新完毕！"
     sleep 3s
@@ -1041,18 +1044,20 @@ update_ssrust() {
 }
 
 uninstall_ssrust() {
-    #check_installed_status
+    #check_ssrust_installed
     echo "确定要卸载 Shadowsocks Rust ? (y/N)"
     echo
     read -e -p "(默认：n)：" unyn
     [[ -z ${unyn} ]] && unyn="n"
     if [[ ${unyn} == [Yy] ]]; then
-        check_status
+        check_ssrust_status
         [[ "$status" == "running" ]] && systemctl stop ss-rust
         systemctl disable ss-rust
         rm -rf "${FOLDER}"
         rm -rf "${SSRUST_FILE}"
         rm -rf "${V2RAY_FILE}"
+        rm -rf /etc/systemd/system/ss-rust.service
+        systemctl daemon-reload
         echo && echo "Shadowsocks Rust 卸载完成！" && echo
     else
         echo && echo "卸载已取消..." && echo
@@ -1070,7 +1075,7 @@ Read_ssrust_config() {
 }
 
 set_ssrust_config() {
-    check_installed_status
+    check_ssrust_installed
     echo && echo -e "你要做什么？
 ==================================
  ${Green_font_prefix}1.${Font_color_suffix}  修改 端口配置
@@ -1162,7 +1167,7 @@ Link_QR() {
 }
 
 view_ssrust_config() {
-    check_installed_status
+    check_ssrust_installed
     Read_ssrust_config
     getipv4
     getipv6
@@ -1208,7 +1213,7 @@ ${Green_font_prefix} 9. 重启 Shadowsocks Rust ${Font_color_suffix}
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ==================================" && echo
     if [[ -e ${SSRUST_FILE} ]]; then
-        check_status
+        check_ssrust_status
         if [[ "$status" == "running" ]]; then
             echo -e " 当前状态：${Green_font_prefix} Shadowsocks Rust 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
         else
@@ -1243,7 +1248,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         Start_ssrust
         ;;
     8)
-        check_ssrsut
+        Stop_ssrust
         ;;
     9)
         Restart_ssrust
@@ -1254,6 +1259,255 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
         setup_ssrust
+        ;;
+    esac
+}
+
+check_kms_installed() {
+    [[ ! -e ${kms_file} ]] && echo -e "${Error} KMS Server 没有安装，请检查！" && setup_kmsserver && return
+}
+
+check_kms_status() {
+    kms_status=$(systemctl status vlmcsd | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+}
+
+Start_kms() {
+    check_kms_installed
+    check_kms_status
+    [[ "$kms_status" == "running" ]] && echo -e "${Info} KMS Server 已在运行 ！" && setup_kmsserver && return
+    systemctl start vlmcsd
+    check_kms_status
+    [[ "$kms_status" == "running" ]] && echo -e "${Info} KMS Server 启动成功 ！"
+    sleep 3s
+    setup_kmsserver
+}
+
+Stop_kms() {
+    check_kms_installed
+    check_kms_status
+    [[ !"$kms_status" == "running" ]] && echo -e "${Error} KMS Server 没有运行，请检查！" && setup_kmsserver && return
+    systemctl stop vlmcsd
+    sleep 3s
+    setup_kmsserver
+}
+
+Restart_kms() {
+    check_kms_installed
+    systemctl restart vlmcsd
+    echo -e "${Info} KMS Server 重启完毕 ！"
+    sleep 3s
+    View
+    setup_kmsserver
+}
+
+Set_kms_port() {
+    while true; do
+        echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
+        echo -e "请输入 KMS Server 端口 [1-65535]"
+        read -e -p "(默认：1688)：" kms_port
+        [[ -z "${kms_port}" ]] && kms_port="1688"
+        echo $((${kms_port} + 0)) &>/dev/null
+        if [[ $? -eq 0 ]]; then
+            if [[ ${kms_port} -ge 1 ]] && [[ ${kms_port} -le 65535 ]]; then
+                echo && echo "=================================="
+                echo -e "${Info} KMS Server 端口：${Red_background_prefix}${kms_port}${Font_color_suffix}"
+                echo "==================================" && echo
+                break
+            else
+                echo -e "${Error}输入了错误的端口:${kms_port}，请重新输入 ！" && echo
+            fi
+        else
+            echo -e "${Error}输入了错误的端口:${kms_port}，请重新输入 ！" && echo
+        fi
+    done
+}
+
+check_kms_new_ver() {
+    kms_new_ver=$(wget -qO- https://api.github.com/repos/Wind4/vlmcsd/releases | jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
+    [[ -z ${kms_new_ver} ]] && echo -e "${Error} KMS Server 最新版本获取失败！" && setup_kmsserver && return
+    echo -e "${Info} 检测到 KMS Server 最新版本为 [ ${kms_new_ver} ]"
+}
+
+kms_Service() {
+    echo "" >${kms_pid}
+    echo "[Unit]
+Description=KMS Server By vlmcsd
+After=syslog.target network.target
+
+[Service]
+Type=forking
+PIDFile=${kms_pid}
+ExecStart=${kms_file} -P${kms_port} -p ${kms_pid}
+ExecReload=/bin/kill -HUP \$MAINPID
+ExecStop=/bin/kill -s QUIT \$MAINPID
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target" >/etc/systemd/system/vlmcsd.service
+    systemctl daemon-reload
+    systemctl enable vlmcsd
+    echo -e "${Info} KMS Server 服务配置完成！"
+}
+
+update_kms() {
+    check_kms_new_ver
+    now_kms_ver=$(cat ${Now_kms_ver_File})
+    if [[ "${now_kms_ver}" != "${kms_new_ver}" ]]; then
+        echo -e "${Info} 发现 KMS Server 已有新版本 [ ${kms_new_ver} ]，旧版本 [ ${now_kms_ver} ]"
+        read -e -p "是否更新 ？ [Y/n]：" yn
+        [[ -z "${yn}" ]] && yn="y"
+        if [[ $yn == [Yy] ]]; then
+            check_kms_status
+            [[ "$kms_status" == "running" ]] && systemctl stop vlmcsd
+            official_kms_Download
+            echo -e "${Info} KMS Server 更新完毕！"
+            sleep 3s
+            Restart_kms
+        fi
+    else
+        echo -e "${Info} 当前 KMS Server 已是最新版本 [ ${kms_new_ver} ] ！"
+    fi
+    setup_kmsserver
+}
+
+official_kms_Download() {
+    echo -e "${Info} 默认开始下载官方源 KMS Server ……"
+    wget --no-check-certificate -N "https://github.com/Wind4/vlmcsd/releases/download/${kms_new_ver}/binaries.tar.gz"
+    if [[ ! -e "binaries.tar.gz" ]]; then
+        echo -e "${Error} KMS Server 官方源下载失败！"
+        return 1
+    else
+        tar -xvf "binaries.tar.gz"
+    fi
+
+    vlmcsd_x64_file="./binaries/Linux/intel/static/vlmcsd-x64-musl-static"
+    if [[ ! -e "${vlmcsd_x64_file}" ]]; then
+        echo -e "${Error} KMS Server 解压失败！"
+        echo -e "${Error} KMS Server 安装失败 !"
+        return 1
+    else
+        cp "${vlmcsd_x64_file}" "${kms_file}"
+        chmod +x "${kms_file}"
+        rm -f binaries.tar.gz
+        rm -rf binaries floppy
+        echo "${kms_new_ver}" >${Now_kms_ver_File}
+
+        echo -e "${Info} KMS Server 主程序下载安装完毕！"
+        return 0
+    fi
+}
+
+install_kms() {
+    if [ -f "${kms_file}" ]; then
+        echo -e "${Error} 检测到 KMS Server 已安装！" && setup_kmsserver && return
+    fi
+
+    check_kms_new_ver
+    Set_kms_port
+    if (! official_kms_Download); then
+        echo -e "${Error} KMS Server 安装失败！"
+    else
+        kms_Service
+        Start_kms
+    fi
+}
+
+uninstall_kms() {
+    echo "确定要卸载 KMS Server ? (y/N)"
+    echo
+    read -e -p "(默认：n)：" unyn
+    [[ -z ${unyn} ]] && unyn="n"
+    if [[ ${unyn} == [Yy] ]]; then
+        check_kms_status
+        [[ "$kms_status" == "running" ]] && systemctl stop vlmcsd
+        systemctl disable vlmcsd
+        rm -rf "${kms_file}"
+        rm -rf "${kms_pid}"
+        rm -rf "${Now_kms_ver_File}"
+        rm -rf /etc/systemd/system/vlmcsd.service
+        systemctl daemon-reload
+        echo && echo "KMS Server 卸载完成！" && echo
+    else
+        echo && echo "卸载已取消..." && echo
+    fi
+    sleep 3s
+    setup_kmsserver
+}
+
+view_kms_config() {
+    echo -e "${Info} KMS Server 无配置文件，service文件中配置端口."
+    echo -e "${Info} KMS Server service:/etc/systemd/system/vlmcsd.service"
+    cat /etc/systemd/system/vlmcsd.service
+    setup_kmsserver
+}
+
+check_kms() {
+    echo -e "${Info} 获取 KMS Server 活动日志 ……"
+    echo -e "${Tip} 返回主菜单请按 q ！"
+    systemctl status vlmcsd
+    setup_kmsserver
+}
+
+setup_kmsserver() {
+    echo -e "安装设置 KMS Server
+==================================
+${Green_font_prefix} 1. 安装 KMS Server ${Font_color_suffix}
+${Yellow_font_prefix} 2. 更新 KMS Server ${Font_color_suffix}
+${Red_font_prefix} 3. 卸载 KMS Server ${Font_color_suffix}
+———————————————————————————————————
+${Green_font_prefix} 4. 查看 KMS Server 配置 ${Font_color_suffix}
+${Green_font_prefix} 5. 查看 KMS Server 运行状态 ${Font_color_suffix}
+———————————————————————————————————
+${Green_font_prefix} 6. 启动 KMS Server ${Font_color_suffix}
+${Red_font_prefix} 7. 停止 KMS Server ${Font_color_suffix}
+${Green_font_prefix} 8. 重启 KMS Server ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+==================================" && echo
+    if [[ -e ${kms_file} ]]; then
+        check_kms_status
+        if [[ "$kms_status" == "running" ]]; then
+            echo -e " 当前状态：${Green_font_prefix} KMS Server 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
+        else
+            echo -e " 当前状态：${Green_font_prefix} KMS Server 已安装${Font_color_suffix} 但 ${Red_font_prefix}未启动${Font_color_suffix}"
+        fi
+    else
+        echo -e " 当前状态：${Red_font_prefix} KMS Server 未安装${Font_color_suffix}"
+    fi
+    echo
+
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        install_kms
+        ;;
+    2)
+        update_kms
+        ;;
+    3)
+        uninstall_kms
+        ;;
+    4)
+        view_kms_config
+        ;;
+    5)
+        check_kms
+        ;;
+    6)
+        Start_kms
+        ;;
+    7)
+        Stop_kms
+        ;;
+    8)
+        Restart_kms
+        ;;
+    0)
+        Start_Menu
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        setup_kmsserver
         ;;
     esac
 }
@@ -1346,6 +1600,8 @@ ${Red_font_prefix} 9. 安装设置 Fail2Ban ${Font_color_suffix}
 ———————————————————————————————————
 ${Green_font_prefix} 10. 安装设置 Shadowsocks Rust ${Font_color_suffix}
 ———————————————————————————————————
+${Green_font_prefix} 11. 安装设置 KMS Server ${Font_color_suffix}
+———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ========================================="
         read -e -p "(请输入序号)：" num
@@ -1381,6 +1637,9 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
             ;;
         10)
             setup_ssrust
+            ;;
+        11)
+            setup_kmsserver
             ;;
         0)
             exit 1

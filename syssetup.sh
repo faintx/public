@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.1"
+sh_ver="1.2.2"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -139,19 +139,19 @@ change_repo() {
 }
 
 view_selinux() {
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
     echo -e "${Info} SELinux 配置：${selinux_con}"
     sestatus
     set_selinux
 }
 
 disable_selinux() {
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
     echo -e "${Info} SELinux 配置：${selinux_con}"
     if [ ${selinux_con} != "SELINUX=disabled" ]; then
-        #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/sysconfig/selinux
-        #echo "SELINUX=disabled" >>/etc/sysconfig/selinux
-        sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/sysconfig/selinux
+        #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/selinux/config
+        #echo "SELINUX=disabled" >>/etc/selinux/config
+        sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/selinux/config
         echo -e "${Info} SELinux 配置已关闭，需要重启生效."
     fi
     set_selinux
@@ -186,7 +186,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 set_ssh_port() {
     [[ ! -e ${SSHConfig} ]] && echo -e "${Error} SSH 配置文件不存在，请检查！" && return
 
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
     echo -e "${Info} SELinux 配置：${selinux_con}"
     if [ ${selinux_con} != "SELINUX=disabled" ]; then
         echo -e "${Info} SELinux 未关闭，更改 SSH 端口会无法连接."

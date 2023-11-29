@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.1.5"
+sh_ver="1.2.1"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -15,6 +15,11 @@ Local="/etc/sysctl.d/local.conf"
 kms_file="/usr/bin/vlmcsd"
 kms_pid="/var/run/vlmcsd.pid"
 Now_kms_ver_File="/var/run/vlmcsd_ver.txt"
+SSCLIENT_FILE="/usr/bin/sslocal"
+SSCLIENT_V2RAY_FILE="/usr/bin/v2ray-plugin"
+SSCLIENT_CONF="/etc/ssclient/local.json"
+PRIVOXY_CONF="/etc/privoxy/config"
+PROFILE_CONF="/etc/profile"
 
 Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m" && Yellow_font_prefix="\033[0;33m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
@@ -133,8 +138,60 @@ change_repo() {
     esac
 }
 
+view_selinux() {
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    echo -e "${Info} SELinux 配置：${selinux_con}"
+    sestatus
+    set_selinux
+}
+
+disable_selinux() {
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    echo -e "${Info} SELinux 配置：${selinux_con}"
+    if [ ${selinux_con} != "SELINUX=disabled" ]; then
+        #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/sysconfig/selinux
+        #echo "SELINUX=disabled" >>/etc/sysconfig/selinux
+        sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/sysconfig/selinux
+        echo -e "${Info} SELinux 配置已关闭，需要重启生效."
+    fi
+    set_selinux
+}
+
+set_selinux() {
+    echo -e "设置 SELinux
+==================================
+${Green_font_prefix} 1. 查看 SELinux 配置 ${Font_color_suffix}
+${Red_font_prefix} 2. 关闭 SELinux ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+=================================="
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        view_selinux
+        ;;
+    2)
+        disable_selinux
+        ;;
+    0)
+        Start_Menu
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        set_selinux
+        ;;
+    esac
+}
+
 set_ssh_port() {
     [[ ! -e ${SSHConfig} ]] && echo -e "${Error} SSH 配置文件不存在，请检查！" && return
+
+    selinux_con=($(sed -n '/^SELINUX=/p' /etc/sysconfig/selinux))
+    echo -e "${Info} SELinux 配置：${selinux_con}"
+    if [ ${selinux_con} != "SELINUX=disabled" ]; then
+        echo -e "${Info} SELinux 未关闭，更改 SSH 端口会无法连接."
+        return
+    fi
 
     old_IFS=IFS
     IFS=$'\n'
@@ -197,9 +254,11 @@ open_firewall_port() {
     install_service firewalld
 
     if _exists "iptables"; then
-        echo -e "${Info} 停用 iptables，有时会影响 firewalld 启动." && echo
-        systemctl stop iptables
-        systemctl disable iptables
+        if systemctl is-active iptables &>/dev/null; then
+            echo -e "${Info} 停用 iptables，有时会影响 firewalld 启动." && echo
+            systemctl stop iptables
+            systemctl disable iptables
+        fi
     fi
 
     echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
@@ -705,8 +764,8 @@ Set_ssrust_cipher() {
  ${Green_font_prefix}16.${Font_color_suffix} 2022-blake3-chacha8-poly1305
  ==================================
  ${Tip} 如需其它加密方式请手动修改配置文件 !" && echo
-    read -e -p "(默认: 3. aes-256-gcm)：" cipher
-    [[ -z "${cipher}" ]] && cipher="3"
+    read -e -p "(默认: 1. chacha20-ietf-poly1305)：" cipher
+    [[ -z "${cipher}" ]] && cipher="1"
     if [[ ${cipher} == "1" ]]; then
         cipher="chacha20-ietf-poly1305"
     elif [[ ${cipher} == "2" ]]; then
@@ -743,7 +802,7 @@ Set_ssrust_cipher() {
         cipher="aes-256-gcm"
     fi
     echo && echo "=================================="
-    echo -e "加密方式:${Red_background_prefix}${cipher}${Font_color_suffix}"
+    echo -e "${Info} 加密方式:${Red_background_prefix}${cipher}${Font_color_suffix}"
     echo "==================================" && echo
 }
 
@@ -854,7 +913,7 @@ official_ssrust_Download() {
         rm -rf "shadowsocks-${ssrust_new_ver}.${arch}-unknown-linux-gnu.tar.xz"
         chmod +x ssserver
         mv -f ssserver "${SSRUST_FILE}"
-        rm sslocal ssmanager ssservice ssurl
+        rm -f sslocal ssmanager ssservice ssurl
         echo "${ssrust_new_ver}" >${Now_ssrust_ver_File}
 
         echo -e "${Info} Shadowsocks Rust 主程序下载安装完毕！"
@@ -1087,7 +1146,8 @@ set_ssrust_config() {
  ${Green_font_prefix}4.${Font_color_suffix}  修改 TFO 配置
 ==================================
  ${Green_font_prefix}5.${Font_color_suffix}  修改 全部配置" && echo
-    read -e -p "(默认：取消)：" modify
+    read -e -p "(默认：取消)(exit或q退出)：" modify
+    [[ $modify == "exit" || $modify == [Qq] ]] && setup_ssrust
     [[ -z "${modify}" ]] && echo "已取消..."
     case "${modify}" in
     1)
@@ -1515,6 +1575,461 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
     esac
 }
 
+ins_ss() {
+    echo -e "${Info} 开始安装 ss-client ..."
+    mv -f sslocal "${SSCLIENT_FILE}"
+    rm -f ssserver ssmanager ssservice ssurl
+
+    echo -e "${Info} 开始安装 v2ray-plugin ..."
+    mv -f v2ray-plugin_linux_amd64 "${SSCLIENT_V2RAY_FILE}"
+}
+
+set_ssserver_ip() {
+    while true; do
+        read -e -p "请输入 SS Server 的 IP 地址：" ssserver_ip
+        if (validate_ip_address "${ssserver_ip}"); then
+            echo && echo "=================================="
+            echo -e "${Info} SS Server 的 IP 地址：${Red_background_prefix}${ssserver_ip}${Font_color_suffix}"
+            echo "==================================" && echo
+            break
+        fi
+    done
+}
+
+set_ssserver_port() {
+    while true; do
+        #echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
+        echo -e "请输入 SS Server 的端口 [1-65535]"
+        read -e -p "(默认：2525)：" ssserver_port
+        [[ -z "${ssserver_port}" ]] && ssserver_port="2525"
+        echo $((${ssserver_port} + 0)) &>/dev/null
+        if [[ $? -eq 0 ]]; then
+            if [[ ${ssserver_port} -ge 1 ]] && [[ ${ssserver_port} -le 65535 ]]; then
+                echo && echo "=================================="
+                echo -e "${Info} SS Server 端口：${Red_background_prefix}${ssserver_port}${Font_color_suffix}"
+                echo "==================================" && echo
+                break
+            else
+                echo -e "${Error}输入了错误的端口:${ssserver_port}，请重新输入 ！" && echo
+            fi
+        else
+            echo -e "${Error}输入了错误的端口:${ssserver_port}，请重新输入 ！" && echo
+        fi
+    done
+}
+
+set_ssserver_passwd() {
+    while true; do
+        read -e -p "请输入 SS Server 的密码：" ssserver_passwd
+        [[ -z "${ssserver_passwd}" ]] && echo -e "${Error} 密码不能为空，请重新输入 ！" && continue
+        echo && echo "=================================="
+        echo -e "${Info} SS Server 的密码：${Red_background_prefix}${ssserver_passwd}${Font_color_suffix}"
+        echo "==================================" && echo
+        break
+    done
+}
+
+set_ssserver_cipher() {
+    echo -e "请选择 SS Server 加密方式
+==================================	
+ ${Green_font_prefix} 1.${Font_color_suffix} chacha20-ietf-poly1305 ${Green_font_prefix}(推荐)${Font_color_suffix}
+ ${Green_font_prefix} 2.${Font_color_suffix} aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
+ ${Green_font_prefix} 3.${Font_color_suffix} aes-256-gcm ${Green_font_prefix}(默认)${Font_color_suffix}
+ ${Green_font_prefix} 4.${Font_color_suffix} plain ${Red_font_prefix}(不推荐)${Font_color_suffix}
+ ${Green_font_prefix} 5.${Font_color_suffix} none ${Red_font_prefix}(不推荐)${Font_color_suffix}
+ ${Green_font_prefix} 6.${Font_color_suffix} table
+ ${Green_font_prefix} 7.${Font_color_suffix} aes-128-cfb
+ ${Green_font_prefix} 8.${Font_color_suffix} aes-256-cfb
+ ${Green_font_prefix} 9.${Font_color_suffix} aes-256-ctr 
+ ${Green_font_prefix}10.${Font_color_suffix} camellia-256-cfb
+ ${Green_font_prefix}11.${Font_color_suffix} rc4-md5
+ ${Green_font_prefix}12.${Font_color_suffix} chacha20-ietf
+==================================
+ ${Tip} AEAD 2022 加密（须v1.15.0及以上版本且密码须经过Base64加密）
+==================================	
+ ${Green_font_prefix}13.${Font_color_suffix} 2022-blake3-aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
+ ${Green_font_prefix}14.${Font_color_suffix} 2022-blake3-aes-256-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
+ ${Green_font_prefix}15.${Font_color_suffix} 2022-blake3-chacha20-poly1305
+ ${Green_font_prefix}16.${Font_color_suffix} 2022-blake3-chacha8-poly1305
+ ==================================
+ ${Tip} 如需其它加密方式请手动修改配置文件 !" && echo
+    read -e -p "(默认: 1. chacha20-ietf-poly1305)：" ssserver_cipher
+    [[ -z "${ssserver_cipher}" ]] && ssserver_cipher="1"
+    if [[ ${ssserver_cipher} == "1" ]]; then
+        ssserver_cipher="chacha20-ietf-poly1305"
+    elif [[ ${ssserver_cipher} == "2" ]]; then
+        ssserver_cipher="aes-128-gcm"
+    elif [[ ${ssserver_cipher} == "3" ]]; then
+        ssserver_cipher="aes-256-gcm"
+    elif [[ ${ssserver_cipher} == "4" ]]; then
+        ssserver_cipher="plain"
+    elif [[ ${ssserver_cipher} == "5" ]]; then
+        ssserver_cipher="none"
+    elif [[ ${ssserver_cipher} == "6" ]]; then
+        ssserver_cipher="table"
+    elif [[ ${ssserver_cipher} == "7" ]]; then
+        ssserver_cipher="aes-128-cfb"
+    elif [[ ${ssserver_cipher} == "8" ]]; then
+        ssserver_cipher="aes-256-cfb"
+    elif [[ ${ssserver_cipher} == "9" ]]; then
+        ssserver_cipher="aes-256-ctr"
+    elif [[ ${ssserver_cipher} == "10" ]]; then
+        ssserver_cipher="camellia-256-cfb"
+    elif [[ ${ssserver_cipher} == "11" ]]; then
+        ssserver_cipher="arc4-md5"
+    elif [[ ${ssserver_cipher} == "12" ]]; then
+        ssserver_cipher="chacha20-ietf"
+    elif [[ ${ssserver_cipher} == "13" ]]; then
+        ssserver_cipher="2022-blake3-aes-128-gcm"
+    elif [[ ${ssserver_cipher} == "14" ]]; then
+        ssserver_cipher="2022-blake3-aes-256-gcm"
+    elif [[ ${ssserver_cipher} == "15" ]]; then
+        ssserver_cipher="2022-blake3-chacha20-poly1305"
+    elif [[ ${ssserver_cipher} == "16" ]]; then
+        ssserver_cipher="2022-blake3-chacha8-poly1305"
+    else
+        ssserver_cipher="aes-256-gcm"
+    fi
+    echo && echo "=================================="
+    echo -e "${Info} SS Server 加密方式:${Red_background_prefix}${ssserver_cipher}${Font_color_suffix}"
+    echo "==================================" && echo
+}
+
+set_sslocal_address() {
+    while true; do
+        read -e -p "请输入 SS local 的 IP 地址(默认127.0.0.1)：" sslocal_address
+        [[ -z "${sslocal_address}" ]] && sslocal_address="127.0.0.1"
+        if (validate_ip_address "${sslocal_address}"); then
+            echo && echo "=================================="
+            echo -e "${Info} SS local 的 IP 地址：${Red_background_prefix}${sslocal_address}${Font_color_suffix}"
+            echo "==================================" && echo
+            break
+        fi
+    done
+}
+
+set_sslocal_port() {
+    while true; do
+        #echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
+        echo -e "请输入 SS local 的端口 [1-65535]"
+        read -e -p "(默认1080)：" sslocal_port
+        [[ -z "${sslocal_port}" ]] && sslocal_port="1080"
+        echo $((${sslocal_port} + 0)) &>/dev/null
+        if [[ $? -eq 0 ]]; then
+            if [[ ${sslocal_port} -ge 1 ]] && [[ ${sslocal_port} -le 65535 ]]; then
+                echo && echo "=================================="
+                echo -e "${Info} SS local 端口：${Red_background_prefix}${sslocal_port}${Font_color_suffix}"
+                echo "==================================" && echo
+                break
+            else
+                echo -e "${Error}输入了错误的端口:${sslocal_port}，请重新输入 ！" && echo
+            fi
+        else
+            echo -e "${Error}输入了错误的端口:${sslocal_port}，请重新输入 ！" && echo
+        fi
+    done
+}
+
+Write_ssclient_config() {
+    mkdir "${SSCLIENT_CONF%\/*}"
+    cat >${SSCLIENT_CONF} <<-EOF
+{
+"server":"${ssserver_ip}",
+"server_port":${ssserver_port},
+"password":"${ssserver_passwd}",
+"method":"${ssserver_cipher}",
+"fast_open":true,
+"timeout":120,
+"local_address":"${sslocal_address}",
+"local_port":${sslocal_port},
+"plugin":"v2ray-plugin",
+"plugin_opts":"path=/admin;loglevel=none"
+}
+EOF
+}
+
+config_ss() {
+    set_ssserver_ip
+    set_ssserver_port
+    set_ssserver_passwd
+    set_ssserver_cipher
+    set_sslocal_address
+    set_sslocal_port
+    Write_ssclient_config
+    echo -e "${Info} ss-client 配置文件完成:${SSCLIENT_CONF}"
+}
+
+service_ss() {
+    echo "
+[Unit]
+Description=ShadowSocks-rust local service
+After=syslog.target network.target auditd.service
+
+[Service]
+Type=simple
+ExecStart=${SSCLIENT_FILE} -c ${SSCLIENT_CONF}
+ExecReload=/bin/kill -HUP \$MAINPID
+ExecStop=/bin/kill -s QUIT \$MAINPID
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target" >/etc/systemd/system/ssrustlocal.service
+    #SSCLIENT_SERVICE="/etc/systemd/system/ssrustlocal.service"
+
+    systemctl daemon-reload
+    systemctl enable ssrustlocal
+    echo -e "${Info} ss-client 服务配置完成！服务名:ssrustlocal.service"
+}
+
+set_local_profile() {
+    echo -e "${Info} 开始设置系统全局代理 ..."
+
+    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    source "${PROFILE_CONF}"
+}
+
+remove_local_profile() {
+    echo -e "${Info} 开始删除系统全局代理 ..."
+
+    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
+    fi
+
+    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
+    fi
+
+    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
+    fi
+
+    source "${PROFILE_CONF}"
+}
+
+open_privoxy() {
+    echo -e "${Info} 打开系统全局代理 ..."
+
+    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    source "${PROFILE_CONF}"
+    echo -e "${Info} 已经打开系统全局代理."
+    setup_ssclient
+}
+
+close_privoxy() {
+    echo -e "${Info} 关闭系统全局代理 ..."
+
+    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export -n http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export -n https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    if [[ ! -z ${profile_con} ]]; then
+        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
+    fi
+    echo "export -n ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
+
+    source "${PROFILE_CONF}"
+    echo -e "${Info} 已经关闭系统全局代理."
+    setup_ssclient
+}
+
+ins_local_privoxy() {
+    echo -e "${Info} 开始安装配置 privoxy ..."
+    yum install -y privoxy
+
+    privoxy_con=($(sed -n '/^forward-socks5t/p' "${PRIVOXY_CONF}"))
+    if [[ ! -z ${privoxy_con} ]]; then
+        sed -i "s/^forward-socks5t/#forward-socks5t/g" "${PRIVOXY_CONF}"
+    fi
+    echo "forward-socks5t   /   ${sslocal_address}:${sslocal_port} ." >>"${PRIVOXY_CONF}"
+
+    privoxy_con=($(sed -n '/^listen-address/p' "${PRIVOXY_CONF}"))
+    if [[ ! -z ${privoxy_con} ]]; then
+        sed -i "s/^listen-address/#listen-address/g" "${PRIVOXY_CONF}"
+    fi
+    echo "listen-address  127.0.0.1:8118" >>"${PRIVOXY_CONF}"
+
+    systemctl restart privoxy
+    systemctl enable privoxy
+
+}
+
+ins_local_ss() {
+    echo -e "${Info} 开始安装/配置 依赖..."
+    #Installation_dependency
+
+    read -e -p "(请输入本地 Shadowsocks Rust 文件名)：" ssclientfile
+    [[ -z "${ssclientfile}" ]] && ssclientfile="shadowsocks-v1.17.0.x86_64-unknown-linux-gnu.tar.xz"
+
+    read -e -p "(请输入本地 v2ray-plugin 文件名)：" v2rayclientfile
+    [[ -z "${v2rayclientfile}" ]] && v2rayclientfile="v2ray-plugin-linux-amd64-v1.3.2.tar.gz"
+
+    tar -xvf "${ssclientfile}"
+    tar -xvf "${v2rayclientfile}"
+
+    if [[ ! -e "sslocal" ]]; then
+        echo -e "${Error} 未找到 sslocal 文件，安装失败！"
+        setup_ssclient
+    fi
+    if [[ ! -e "v2ray-plugin_linux_amd64" ]]; then
+        echo -e "${Error} 未找到 sslocal 文件，安装失败！"
+        setup_ssclient
+    fi
+
+    ins_ss
+    config_ss
+    service_ss
+    systemctl start ssrustlocal
+
+    ins_local_privoxy
+    set_local_profile
+
+    echo -e "${Info} 安装完成."
+    setup_ssclient
+}
+
+ins_online_ss() {
+    echo -e "${Info} 在线安装 ss-client 暂未实现..."
+    install_ssclient
+}
+
+install_ssclient() {
+    [[ -e ${SSCLIENT_FILE} ]] && echo -e "${Error} 检测到 ss-client 已安装！" && setup_ssclient && return
+
+    echo -e "选择 ss-client 安装方式
+==================================
+${Green_font_prefix} 1. 在线安装 ss-client ${Font_color_suffix}
+${Red_font_prefix} 2. 本地安装 ss-client ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+=================================="
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        ins_online_ss
+        ;;
+    2)
+        ins_local_ss
+        ;;
+    0)
+        setup_ssclient
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        install_ssclient
+        ;;
+    esac
+
+}
+
+uninstall_ssclient() {
+    systemctl stop ssrustlocal
+    systemctl disable ssrustlocal
+    rm -f "${SSCLIENT_FILE}"
+    rm -f "${SSCLIENT_V2RAY_FILE}"
+    rm -rf "${SSCLIENT_CONF%\/*}"
+    rm -f /etc/systemd/system/ssrustlocal.service
+
+    systemctl stop privoxy
+    systemctl disable privoxy
+    yum remove -y privoxy
+    rm -f "${PRIVOXY_CONF}"
+    remove_local_profile
+    setup_ssclient
+}
+
+check_ssclient() {
+    echo -e "${Info} 获取 ss-client & privoxy 活动日志 ……"
+    echo -e "${Tip} 返回主菜单请按 q ！"
+    systemctl status ssrustlocal
+    systemctl status privoxy
+    setup_ssclient
+}
+
+setup_ssclient() {
+    echo -e "安装设置 ss-client & privoxy
+==================================
+${Green_font_prefix} 1. 安装 ss-client & privoxy ${Font_color_suffix}
+${Red_font_prefix} 2. 卸载 ss-client & privoxy ${Font_color_suffix}
+${Green_font_prefix} 3. 查看 ss-client & privoxy 状态 ${Font_color_suffix}
+———————————————————————————————————
+${Green_font_prefix} 4. 打开 privoxy 全局代理 ${Font_color_suffix}
+${Red_font_prefix} 5. 关闭 privoxy 全局代理 ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+=================================="
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        install_ssclient
+        ;;
+    2)
+        uninstall_ssclient
+        ;;
+    3)
+        check_ssclient
+        ;;
+    4)
+        open_privoxy
+        ;;
+    5)
+        close_privoxy
+        ;;
+    0)
+        Start_Menu
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        setup_ssclient
+        ;;
+    esac
+}
+
 do_swap() {
     swap_file="/root/swapfile"
     echo -e "${Info} 删除 swap 交换分区"
@@ -1592,18 +2107,20 @@ ${Red_font_prefix}System Set Up 管理脚本 [v${sh_ver}]${Font_color_suffix}
 ${Yellow_font_prefix} 1. 更新本脚本 ${Font_color_suffix}
 ———————————————————————————————————
 ${Green_font_prefix} 2. 添加 swap 交换分区 ${Font_color_suffix}
-${Green_font_prefix} 3. 更换阿里源 ${Font_color_suffix}
+${Red_font_prefix} 3. 更换阿里源 ${Font_color_suffix}
 ${Green_font_prefix} 4. 更新系统，安装常用工具 ${Font_color_suffix}
+${Red_font_prefix} 5. 设置 SELinux ${Font_color_suffix}
 ———————————————————————————————————
-${Green_font_prefix} 5. 设置 SSH 端口 ${Font_color_suffix}
-${Red_font_prefix} 6. 设置 firewalld 防火墙 ${Font_color_suffix}
-${Green_font_prefix} 7. 安装设置 NTP chrony ${Font_color_suffix}
-${Green_font_prefix} 8. 编译安装 Python ${Font_color_suffix}
-${Red_font_prefix} 9. 安装设置 Fail2Ban ${Font_color_suffix}
+${Green_font_prefix} 6. 设置 SSH 端口 ${Font_color_suffix}
+${Red_font_prefix} 7. 设置 firewalld 防火墙 ${Font_color_suffix}
+${Green_font_prefix} 8. 安装设置 NTP chrony ${Font_color_suffix}
+${Green_font_prefix} 9. 编译安装 Python ${Font_color_suffix}
+${Red_font_prefix} 10. 安装设置 Fail2Ban ${Font_color_suffix}
 ———————————————————————————————————
-${Green_font_prefix} 10. 安装设置 Shadowsocks Rust ${Font_color_suffix}
+${Green_font_prefix} 11. 安装设置 Shadowsocks Rust ${Font_color_suffix}
+${Green_font_prefix} 12. 安装设置 ss-client & privoxy ${Font_color_suffix}
 ———————————————————————————————————
-${Green_font_prefix} 11. 安装设置 KMS Server ${Font_color_suffix}
+${Green_font_prefix} 13. 安装设置 KMS Server ${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ========================================="
@@ -1621,27 +2138,33 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         4)
             yum update -y
             yum install -y epel-release
-            yum install -y wget git gcc automake autoconf libtool make net-tools
+            yum install -y wget git gcc automake autoconf libtool make net-tools jq
             ;;
         5)
-            set_ssh_port
+            set_selinux
             ;;
         6)
-            set_firewall
+            set_ssh_port
             ;;
         7)
-            set_ntp_chrony
+            set_firewall
             ;;
         8)
-            install_python
+            set_ntp_chrony
             ;;
         9)
-            install_fail2ban
+            install_python
             ;;
         10)
-            setup_ssrust
+            install_fail2ban
             ;;
         11)
+            setup_ssrust
+            ;;
+        12)
+            setup_ssclient
+            ;;
+        13)
             setup_kmsserver
             ;;
         0)

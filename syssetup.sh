@@ -100,7 +100,7 @@ change_repo() {
     [[ -z ${unyn} ]] && unyn="n"
     if [[ ${unyn} == [Nn] ]]; then
         Start_Menu
-        $is_close=true
+        is_close=true
         return
     fi
 
@@ -178,7 +178,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -338,7 +338,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -488,7 +488,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -653,7 +653,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -1331,7 +1331,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -1581,7 +1581,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -2037,7 +2037,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
-        $is_close=true
+        is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -2078,7 +2078,7 @@ add_swapfile() {
     echo -e "${Info} 开始添加 swap 交换分区......"
 
     read -e -p "请输入你想要创建的交换分区大小(单位GB，默认1GB)(exit退出)：" swapgb
-    [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu && $is_close=true && return
+    [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu && is_close=true && return
     [[ -z ${swapgb} ]] && swapgb=1
     do_swap ${swapgb}
 }
@@ -2086,7 +2086,7 @@ add_swapfile() {
 Update_Shell() {
     echo -e "当前版本为 [ ${sh_ver} ]，开始检测最新版本..."
     sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'sh_ver="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
-    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu && $is_close=true && return
+    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu && is_close=true && return
     if [[ ${sh_new_ver} != ${sh_ver} ]]; then
         echo -e "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
         read -p "(默认：y)：" yn
@@ -2101,13 +2101,13 @@ Update_Shell() {
             echo && echo "	已取消..." && echo
             sleep 3s
             Start_Menu
-            $is_close=true
+            is_close=true
         fi
     else
         echo -e "当前已是最新版本[ ${sh_new_ver} ] ！"
         sleep 3s
         Start_Menu
-        $is_close=true
+        is_close=true
     fi
 }
 

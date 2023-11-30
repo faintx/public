@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.5"
+sh_ver="1.2.6"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -2117,7 +2117,7 @@ Start_Menu() {
     check_sys
     sysArch
 
-    if (! $cr -eq 4 || ! $is_close); then
+    if [[ ! $cr -eq 4 && false = $is_close ]]; then
         while true; do
             echo -e "
 =========================================

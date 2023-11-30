@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.4"
+sh_ver="1.2.5"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -20,6 +20,7 @@ SSCLIENT_V2RAY_FILE="/usr/bin/v2ray-plugin"
 SSCLIENT_CONF="/etc/ssclient/local.json"
 PRIVOXY_CONF="/etc/privoxy/config"
 PROFILE_CONF="/etc/profile"
+is_close=false
 
 Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m" && Yellow_font_prefix="\033[0;33m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
@@ -99,6 +100,8 @@ change_repo() {
     [[ -z ${unyn} ]] && unyn="n"
     if [[ ${unyn} == [Nn] ]]; then
         Start_Menu
+        $is_close=true
+        return
     fi
 
     case "$(_os)" in
@@ -175,6 +178,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -334,6 +338,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -483,6 +488,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -647,6 +653,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -1324,6 +1331,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -1573,6 +1581,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -2028,6 +2037,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
         ;;
     0)
         Start_Menu
+        $is_close=true
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -2068,7 +2078,7 @@ add_swapfile() {
     echo -e "${Info} 开始添加 swap 交换分区......"
 
     read -e -p "请输入你想要创建的交换分区大小(单位GB，默认1GB)(exit退出)：" swapgb
-    [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu
+    [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu && $is_close=true && return
     [[ -z ${swapgb} ]] && swapgb=1
     do_swap ${swapgb}
 }
@@ -2076,7 +2086,7 @@ add_swapfile() {
 Update_Shell() {
     echo -e "当前版本为 [ ${sh_ver} ]，开始检测最新版本..."
     sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'sh_ver="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
-    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu
+    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu && $is_close=true && return
     if [[ ${sh_new_ver} != ${sh_ver} ]]; then
         echo -e "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
         read -p "(默认：y)：" yn
@@ -2091,11 +2101,13 @@ Update_Shell() {
             echo && echo "	已取消..." && echo
             sleep 3s
             Start_Menu
+            $is_close=true
         fi
     else
         echo -e "当前已是最新版本[ ${sh_new_ver} ] ！"
         sleep 3s
         Start_Menu
+        $is_close=true
     fi
 }
 
@@ -2105,7 +2117,7 @@ Start_Menu() {
     check_sys
     sysArch
 
-    if (! $cr -eq 4); then
+    if (! $cr -eq 4 || ! $is_close); then
         while true; do
             echo -e "
 =========================================

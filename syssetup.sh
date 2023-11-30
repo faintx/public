@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.3"
+sh_ver="1.2.4"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -2086,7 +2086,7 @@ Update_Shell() {
             echo -e "脚本已更新为最新版本[ ${sh_new_ver} ]！"
             echo -e "3s后执行新脚本"
             sleep 3s
-            bash syssetup.sh
+            source syssetup.sh
         else
             echo && echo "	已取消..." && echo
             sleep 3s

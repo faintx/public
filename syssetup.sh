@@ -2,7 +2,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.2"
+sh_ver="1.2.3"
 SSHConfig="/etc/ssh/sshd_config"
 fail2ban_dir="/root/fail2ban/"
 FOLDER="/etc/ss-rust"
@@ -27,7 +27,7 @@ Error="${Red_font_prefix}[错误]${Font_color_suffix}"
 Tip="${Yellow_font_prefix}[注意]${Font_color_suffix}"
 
 check_root() {
-    [[ $EUID != 0 ]] && echo -e "${Error} 当前非ROOT账号(或没有ROOT权限)，无法继续操作，请更换ROOT账号或使用 ${Green_background_prefix}sudo su${Font_color_suffix} 命令获取临时ROOT权限（执行后可能会提示输入当前账号的密码）。" && exit 1
+    [[ $EUID != 0 ]] && echo -e "${Error} 当前非ROOT账号(或没有ROOT权限)，无法继续操作，请更换ROOT账号或使用 ${Green_background_prefix}sudo su${Font_color_suffix} 命令获取临时ROOT权限（执行后可能会提示输入当前账号的密码）。" && return 4
 }
 
 check_sys() {
@@ -1144,8 +1144,11 @@ set_ssrust_config() {
  ${Green_font_prefix}2.${Font_color_suffix}  修改 密码配置
  ${Green_font_prefix}3.${Font_color_suffix}  修改 加密配置
  ${Green_font_prefix}4.${Font_color_suffix}  修改 TFO 配置
-==================================
- ${Green_font_prefix}5.${Font_color_suffix}  修改 全部配置" && echo
+———————————————————————————————————
+ ${Green_font_prefix}5.${Font_color_suffix}  修改 全部配置
+———————————————————————————————————
+ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+==================================" && echo
     read -e -p "(默认：取消)(exit或q退出)：" modify
     [[ $modify == "exit" || $modify == [Qq] ]] && setup_ssrust
     [[ -z "${modify}" ]] && echo "已取消..."
@@ -1182,6 +1185,9 @@ set_ssrust_config() {
         Set_tfo
         Write_ssrust_config
         Restart_ssrust
+        ;;
+    0)
+        setup_ssrust
         ;;
     *)
         echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
@@ -2095,12 +2101,13 @@ Update_Shell() {
 
 Start_Menu() {
     clear
-    check_root
+    cr=check_root
     check_sys
     sysArch
 
-    while true; do
-        echo -e "
+    if (! $cr -eq 4); then
+        while true; do
+            echo -e "
 =========================================
 ${Red_font_prefix}System Set Up 管理脚本 [v${sh_ver}]${Font_color_suffix}
 =========================================
@@ -2124,56 +2131,57 @@ ${Green_font_prefix} 13. 安装设置 KMS Server ${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ========================================="
-        read -e -p "(请输入序号)：" num
-        case "${num}" in
-        1)
-            Update_Shell
-            ;;
-        2)
-            add_swapfile
-            ;;
-        3)
-            change_repo
-            ;;
-        4)
-            yum update -y
-            yum install -y epel-release
-            yum install -y wget git gcc automake autoconf libtool make net-tools jq
-            ;;
-        5)
-            set_selinux
-            ;;
-        6)
-            set_ssh_port
-            ;;
-        7)
-            set_firewall
-            ;;
-        8)
-            set_ntp_chrony
-            ;;
-        9)
-            install_python
-            ;;
-        10)
-            install_fail2ban
-            ;;
-        11)
-            setup_ssrust
-            ;;
-        12)
-            setup_ssclient
-            ;;
-        13)
-            setup_kmsserver
-            ;;
-        0)
-            exit 1
-            ;;
-        *)
-            echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-            ;;
-        esac
-    done
+            read -e -p "(请输入序号)：" num
+            case "${num}" in
+            1)
+                Update_Shell
+                ;;
+            2)
+                add_swapfile
+                ;;
+            3)
+                change_repo
+                ;;
+            4)
+                yum update -y
+                yum install -y epel-release
+                yum install -y wget git gcc automake autoconf libtool make net-tools jq
+                ;;
+            5)
+                set_selinux
+                ;;
+            6)
+                set_ssh_port
+                ;;
+            7)
+                set_firewall
+                ;;
+            8)
+                set_ntp_chrony
+                ;;
+            9)
+                install_python
+                ;;
+            10)
+                install_fail2ban
+                ;;
+            11)
+                setup_ssrust
+                ;;
+            12)
+                setup_ssclient
+                ;;
+            13)
+                setup_kmsserver
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+                ;;
+            esac
+        done
+    fi
 }
 Start_Menu

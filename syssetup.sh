@@ -2,9 +2,10 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-sh_ver="1.2.7"
+sh_ver="1.2.8"
 SSHConfig="/etc/ssh/sshd_config"
-fail2ban_dir="/root/fail2ban/"
+#fail2ban_dir="/root/fail2ban/"
+fail2ban_dir="$(pwd)/fail2ban/"
 FOLDER="/etc/ss-rust"
 SSRUST_FILE="/usr/local/bin/ss-rust"
 V2RAY_FILE="/usr/local/bin/v2ray-plugin"
@@ -92,20 +93,49 @@ _os_ver() {
     printf -- "%s" "${main_ver%%.*}"
 }
 
-change_repo() {
-    cat /etc/redhat-release
-    echo "确定要切换至阿里源 （CentOS Stream 未实现，不要换） ? (y/N)"
-    echo
-    read -e -p "(默认：n)：" unyn
-    [[ -z ${unyn} ]] && unyn="n"
-    if [[ ${unyn} == [Nn] ]]; then
-        Start_Menu
-        is_close=true
-        return
-    fi
-
+change_vault_repo() {
     case "$(_os)" in
     centos)
+        os_version=$(cat /etc/centos-release)
+        echo "$os_version"
+        if [[ "$os_version" == *"Stream"* ]]; then
+            echo -e "${Info} CentOS Stream 系统不需要切换源."
+            set_repo
+            return
+        fi
+
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+        yum clean all && yum makecache
+        ;;
+    ubuntu | debian)
+        echo -e "${Info} 暂不支持该系统."
+        ;;
+    *) ;; # do nothing
+    esac
+    set_repo
+}
+
+change_aliyun_repo() {
+    case "$(_os)" in
+    centos)
+        os_version=$(cat /etc/centos-release)
+        echo "$os_version"
+        if [[ "$os_version" == *"Stream"* ]]; then
+            echo -e "${Info} CentOS Stream 系统不需要切换源."
+            set_repo
+            return
+        fi
+
+        echo "确定要切换至阿里源 ? (y/N)"
+        echo
+        read -e -p "(默认：n)：" unyn
+        [[ -z ${unyn} ]] && unyn="n"
+        if [[ ${unyn} == [Nn] ]]; then
+            set_repo
+            return
+        fi
+
         sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
         sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
@@ -127,7 +157,7 @@ change_repo() {
                 #mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
                 #mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
                 yum clean all && yum makecache
-                yum update -y
+                #yum update -y
             else
                 echo -e "${Error} 下载 repo 文件失败."
                 mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
@@ -139,17 +169,71 @@ change_repo() {
         ;;
     *) ;; # do nothing
     esac
+    set_repo
+}
+
+view_repo() {
+    case "$(_os)" in
+    centos)
+        os_version=$(cat /etc/centos-release)
+        echo "$os_version"
+        if [[ "$os_version" == *"Stream"* ]]; then
+            cat /etc/yum.repos.d/CentOS-Stream-BaseOS.repo | grep "name\|http"
+            cat /etc/yum.repos.d/CentOS-Stream-AppStream.repo | grep "name\|http"
+        else
+            cat /etc/yum.repos.d/CentOS-Base.repo | grep "name\|http"
+            cat /etc/yum.repos.d/CentOS-Linux-BaseOS.repo | grep "name\|http"
+            cat /etc/yum.repos.d/CentOS-Linux-AppStream.repo | grep "name\|http"
+        fi
+        ;;
+    ubuntu | debian)
+        echo -e "${Info} 暂不支持该系统."
+        ;;
+    *) ;; # do nothing
+    esac
+    set_repo
+}
+
+set_repo() {
+    echo -e "设置 repo 源
+==================================
+${Green_font_prefix} 1. 切换至 vault.centos.org 源 ${Font_color_suffix}
+${Red_font_prefix} 2. 切换至 aliyun 源 ${Font_color_suffix}
+${Green_font_prefix} 3. 查看当前源 ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+=================================="
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        change_vault_repo
+        ;;
+    2)
+        change_aliyun_repo
+        ;;
+    3)
+        view_repo
+        ;;
+    0)
+        Start_Menu
+        is_close=true
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        set_repo
+        ;;
+    esac
 }
 
 view_selinux() {
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
+    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
     echo -e "${Info} SELinux 配置：${selinux_con}"
     sestatus
     set_selinux
 }
 
 disable_selinux() {
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
+    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
     echo -e "${Info} SELinux 配置：${selinux_con}"
     if [ ${selinux_con} != "SELINUX=disabled" ]; then
         #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/selinux/config
@@ -190,7 +274,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 set_ssh_port() {
     [[ ! -e ${SSHConfig} ]] && echo -e "${Error} SSH 配置文件不存在，请检查！" && return
 
-    selinux_con=($(sed -n '/^SELINUX=/p' /etc/selinux/config))
+    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
     echo -e "${Info} SELinux 配置：${selinux_con}"
     if [ ${selinux_con} != "SELINUX=disabled" ]; then
         echo -e "${Info} SELinux 未关闭，更改 SSH 端口会无法连接."
@@ -199,7 +283,7 @@ set_ssh_port() {
 
     old_IFS=IFS
     IFS=$'\n'
-    old_port=($(sed -n '/^Port /p' ${SSHConfig}))
+    old_port=$(sed -n '/^Port /p' ${SSHConfig})
     len=${#old_port[*]}
     echo -e "${Info} 原 SSH 端口:"
     echo "----------"
@@ -314,6 +398,7 @@ remove_firewall_port() {
 
 view_firewall_port() {
     echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
+    set_firewall
 }
 
 set_firewall() {
@@ -347,7 +432,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
     esac
 }
 
-set_ntp_chrony() {
+ins_ntp_chrony() {
     if ! _exists "chronyd"; then
         echo -e "${Info} 开始安装 chrony ......" && echo
         yum install -y chrony
@@ -382,6 +467,46 @@ EOF
     chronyc sourcestats -v
     timedatectl
     systemctl restart rsyslog
+    set_ntp_chrony
+}
+
+view_ntp_chrony() {
+    if _exists "chronyd"; then
+        systemctl status chronyd
+        chronyc sourcestats -v
+        timedatectl
+    else
+        echo -e "${Info} NTP chrony 未安装."
+    fi
+    set_ntp_chrony
+}
+
+set_ntp_chrony() {
+    echo -e "安装设置 NTP chrony
+==================================
+${Green_font_prefix} 1. 安装  NTP chrony ${Font_color_suffix}
+${Red_font_prefix} 2. 查看并同步 NTP chrony ${Font_color_suffix}
+———————————————————————————————————
+${Yellow_font_prefix} 0. 退出${Font_color_suffix}
+=================================="
+    read -e -p "(请输入序号)：" num
+    case "${num}" in
+    1)
+        ins_ntp_chrony
+        ;;
+    2)
+        view_ntp_chrony
+        ;;
+    0)
+        Start_Menu
+        is_close=true
+        ;;
+    *)
+        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
+        set_ntp_chrony
+        ;;
+    esac
+
 }
 
 view_python() {
@@ -455,7 +580,7 @@ ins_python() {
             return 1
         else
             tar zxvf Python-${PYTHON_VER}.tgz
-            pushd Python-${PYTHON_VER}
+            pushd "Python-${PYTHON_VER}"
             ./configure --enable-optimizations --prefix="${pythondir}"
             make && make altinstall
             popd
@@ -501,9 +626,9 @@ setup_fail2ban() {
     echo -e "${Info} 开始 git 下载、编译安装 Fail2Ban ......" && echo
 
     if [ ! -d "${fail2ban_dir}" ]; then
-        git clone https://github.com/fail2ban/fail2ban.git ${fail2ban_dir}
+        git clone https://github.com/fail2ban/fail2ban.git "${fail2ban_dir}"
         if [[ $? -eq 0 ]]; then
-            pushd ${fail2ban_dir}
+            pushd "${fail2ban_dir}"
             python3 setup.py install
             popd
             echo -e "${Tip} Fail2Ban 安装完成，需要设置配置后才能启动运行!!!"
@@ -512,7 +637,7 @@ setup_fail2ban() {
             echo -e "${Error} 请检查网络，或地址:https://github.com/fail2ban/fail2ban.git"
         fi
     else
-        pushd ${fail2ban_dir}
+        pushd "${fail2ban_dir}"
         BRANCH=master
         LOCAL=$(git log $BRANCH -n 1 --pretty=format:"%H")
         REMOTE=$(git log remotes/origin/$BRANCH -n 1 --pretty=format:"%H")
@@ -558,8 +683,8 @@ maxretry = 2" >/etc/fail2ban/jail.local
 
             f2b_con=$(sed -n "/^ExecStart=/p" "${fail2ban_dir}build/fail2ban.service" | awk -F"=" '{ print $2 }')
             f2b_path=${f2b_con%/*}
-            ln -fs ${f2b_path}/fail2ban-server /usr/bin/fail2ban-server
-            ln -fs ${f2b_path}/fail2ban-client /usr/bin/fail2ban-client
+            ln -fs "${f2b_path}/fail2ban-server" /usr/bin/fail2ban-server
+            ln -fs "${f2b_path}/fail2ban-client" /usr/bin/fail2ban-client
 
             systemctl daemon-reload
             systemctl enable fail2ban
@@ -573,6 +698,7 @@ maxretry = 2" >/etc/fail2ban/jail.local
 }
 
 checkssh_fail2ban() {
+    systemctl status fail2ban
     fail2ban-client status sshd
     install_fail2ban
 }
@@ -628,6 +754,9 @@ upbanip_fail2ban() {
 }
 
 install_fail2ban() {
+    #cur_dir=$(pwd)
+    #fail2ban_dir="${cur_dir}/fail2ban/"
+
     echo -e "安装设置 Fail2Ban
 ==================================
 ${Green_font_prefix} 1. 安装 Fail2Ban${Font_color_suffix}
@@ -675,7 +804,7 @@ Set_ssrust_port() {
         echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
         echo -e "请输入 Shadowsocks Rust 端口 [1-65535]"
         read -e -p "(默认：2525)：" ssrust_port
-        [[ -z "${ssrust_port}" ]] && ssrust_port="2525"
+        [[ -z "${ssrust_port}" ]] && ssrust_port=2525
         echo $((${ssrust_port} + 0)) &>/dev/null
         if [[ $? -eq 0 ]]; then
             if [[ ${ssrust_port} -ge 1 ]] && [[ ${ssrust_port} -le 65535 ]]; then
@@ -840,7 +969,7 @@ net.ipv4.tcp_mtu_probing = 1
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control = bbr" >>/etc/sysctl.d/local.conf && sysctl --system >/dev/null 2>&1
     else
-        echo -e "$Error系统内核版本过低，无法支持 TCP Fast Open ！"
+        echo -e "${Error}系统内核版本过低，无法支持 TCP Fast Open ！"
     fi
 }
 
@@ -848,9 +977,9 @@ disable_tfo() {
     kernel=$(uname -r | awk -F . '{print $1}')
     if [ "$kernel" -ge 3 ]; then
         echo 0 >/proc/sys/net/ipv4/tcp_fastopen
-        [[ -e $Local ]] && rm -f /etc/sysctl.d/local.conf && sysctl --system >/dev/null 2>&1
+        [[ -e "$Local" ]] && rm -f /etc/sysctl.d/local.conf && sysctl --system >/dev/null 2>&1
     else
-        echo -e "$Error系统内核版本过低，无法支持 TCP Fast Open ！"
+        echo -e "${Error}系统内核版本过低，无法支持 TCP Fast Open ！"
     fi
 
 }
@@ -921,7 +1050,7 @@ official_ssrust_Download() {
         chmod +x ssserver
         mv -f ssserver "${SSRUST_FILE}"
         rm -f sslocal ssmanager ssservice ssurl
-        echo "${ssrust_new_ver}" >${Now_ssrust_ver_File}
+        echo "${ssrust_new_ver}" >"${Now_ssrust_ver_File}"
 
         echo -e "${Info} Shadowsocks Rust 主程序下载安装完毕！"
         return 0
@@ -944,7 +1073,7 @@ official_v2ray_Download() {
     else
         rm -rf "v2ray-plugin-linux-amd64-${v2ray_new_ver}.tar.gz"
         mv -f v2ray-plugin_linux_amd64 "${V2RAY_FILE}"
-        echo "${v2ray_new_ver}" >${Now_v2ray_ver_File}
+        echo "${v2ray_new_ver}" >"${Now_v2ray_ver_File}"
 
         echo -e "${Info} Shadowsocks v2ray-plugin 主程序下载安装完毕！"
         return 0
@@ -990,7 +1119,7 @@ WantedBy=multi-user.target" >/etc/systemd/system/ss-rust.service
 }
 
 Write_ssrust_config() {
-    cat >${CONF} <<-EOF
+    cat >"${CONF}" <<-EOF
 {
     "server":"::",
     "server_port":${ssrust_port},
@@ -1030,12 +1159,12 @@ Restart_ssrust() {
     systemctl restart ss-rust
     echo -e "${Info} Shadowsocks Rust 重启完毕 ！"
     sleep 3s
-    View
+    #View
     setup_ssrust
 }
 
 install_ssrust() {
-    [[ -e ${SSRUST_FILE} ]] && echo -e "${Error} 检测到 Shadowsocks Rust 已安装！" && setup_ssrust && return
+    [[ -e "${SSRUST_FILE}" ]] && echo -e "${Error} 检测到 Shadowsocks Rust 已安装！" && setup_ssrust && return
 
     echo -e "${Info} 开始设置 配置..."
     Set_ssrust_port
@@ -1063,9 +1192,9 @@ install_ssrust() {
 }
 
 check_ver_comparison() {
-    need_restart=false
+    need_restart="false"
     check_ssrust_new_ver
-    now_ssrust_ver=$(cat ${Now_ssrust_ver_File})
+    now_ssrust_ver=$(cat "${Now_ssrust_ver_File}")
     if [[ "${now_ssrust_ver}" != "${ssrust_new_ver}" ]]; then
         echo -e "${Info} 发现 Shadowsocks Rust 已有新版本 [ ${ssrust_new_ver} ]，旧版本 [ ${now_ssrust_ver} ]"
         read -e -p "是否更新 ？ [Y/n]：" yn
@@ -1077,14 +1206,14 @@ check_ver_comparison() {
             # rm -rf ${FOLDER}
             ssrust_Download
             #mv -f "/tmp/config.json" "${CONF}"
-            need_restart=true
+            need_restart="true"
         fi
     else
         echo -e "${Info} 当前 Shadowsocks Rust 已是最新版本 [ ${ssrust_new_ver} ] ！"
     fi
 
     check_v2ray_new_ver
-    now_v2ray_ver=$(cat ${Now_v2ray_ver_File})
+    now_v2ray_ver=$(cat "${Now_v2ray_ver_File}")
     if [[ "${now_v2ray_ver}" != "${v2ray_new_ver}" ]]; then
         echo -e "${Info} 发现 Shadowsocks v2ray-plugin 已有新版本 [ ${v2ray_new_ver} ]，旧版本 [ ${now_v2ray_ver} ]"
         read -e -p "是否更新 ？ [Y/n]：" yn
@@ -1093,22 +1222,24 @@ check_ver_comparison() {
             check_ssrust_status
             [[ "$status" == "running" ]] && systemctl stop ss-rust
             v2ray_Download
-            need_restart=true
+            need_restart="true"
         fi
     else
-        echo -e "${Info} 当前 Shadowsocks v2ray-plugin 已是最新版本 [ ${ssrust_new_ver} ] ！"
+        echo -e "${Info} 当前 Shadowsocks v2ray-plugin 已是最新版本 [ ${now_v2ray_ver} ] ！"
     fi
 
-    if (${need_restart}); then
-        Restart_ssrust
+    if [[ "true" == "${need_restart}" ]]; then
+        systemctl restart ss-rust
+        sleep 3s
+        echo -e "${Info} Shadowsocks Rust 更新完毕！"
+    else
+        echo -e "${Info} Shadowsocks Rust 不需要更新！"
     fi
 }
 
 update_ssrust() {
     check_ssrust_installed
     check_ver_comparison
-    echo -e "${Info} Shadowsocks Rust 更新完毕！"
-    sleep 3s
     setup_ssrust
 }
 
@@ -1136,11 +1267,11 @@ uninstall_ssrust() {
 }
 
 Read_ssrust_config() {
-    [[ ! -e ${CONF} ]] && echo -e "${Error} Shadowsocks Rust 配置文件不存在！" && setup_ssrust && return
-    ssrust_port=$(cat ${CONF} | jq -r '.server_port')
-    ssrust_password=$(cat ${CONF} | jq -r '.password')
-    cipher=$(cat ${CONF} | jq -r '.method')
-    tfo=$(cat ${CONF} | jq -r '.fast_open')
+    [[ ! -e "${CONF}" ]] && echo -e "${Error} Shadowsocks Rust 配置文件不存在！" && setup_ssrust && return
+    ssrust_port=$(cat "${CONF}" | jq -r '.server_port')
+    ssrust_password=$(cat "${CONF}" | jq -r '.password')
+    cipher=$(cat "${CONF}" | jq -r '.method')
+    tfo=$(cat "${CONF}" | jq -r '.fast_open')
 }
 
 set_ssrust_config() {
@@ -1261,7 +1392,7 @@ view_ssrust_config() {
     #[[ ! -z "${link_ipv4}" ]] && echo -e "${link_ipv4}"
     #[[ ! -z "${link_ipv6}" ]] && echo -e "${link_ipv6}"
     #echo -e "——————————————————————————————————"
-
+    setup_ssrust
 }
 
 check_ssrsut() {
@@ -1288,7 +1419,7 @@ ${Green_font_prefix} 9. 重启 Shadowsocks Rust ${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ==================================" && echo
-    if [[ -e ${SSRUST_FILE} ]]; then
+    if [[ -e "${SSRUST_FILE}" ]]; then
         check_ssrust_status
         if [[ "$status" == "running" ]]; then
             echo -e " 当前状态：${Green_font_prefix} Shadowsocks Rust 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
@@ -1373,7 +1504,6 @@ Restart_kms() {
     systemctl restart vlmcsd
     echo -e "${Info} KMS Server 重启完毕 ！"
     sleep 3s
-    View
     setup_kmsserver
 }
 
@@ -1406,7 +1536,7 @@ check_kms_new_ver() {
 }
 
 kms_Service() {
-    echo "" >${kms_pid}
+    echo "" >"${kms_pid}"
     echo "[Unit]
 Description=KMS Server By vlmcsd
 After=syslog.target network.target
@@ -1467,7 +1597,7 @@ official_kms_Download() {
         chmod +x "${kms_file}"
         rm -f binaries.tar.gz
         rm -rf binaries floppy
-        echo "${kms_new_ver}" >${Now_kms_ver_File}
+        echo "${kms_new_ver}" >"${Now_kms_ver_File}"
 
         echo -e "${Info} KMS Server 主程序下载安装完毕！"
         return 0
@@ -1541,7 +1671,7 @@ ${Green_font_prefix} 8. 重启 KMS Server ${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 ==================================" && echo
-    if [[ -e ${kms_file} ]]; then
+    if [[ -e "${kms_file}" ]]; then
         check_kms_status
         if [[ "$kms_status" == "running" ]]; then
             echo -e " 当前状态：${Green_font_prefix} KMS Server 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
@@ -1747,7 +1877,7 @@ set_sslocal_port() {
 
 Write_ssclient_config() {
     mkdir "${SSCLIENT_CONF%\/*}"
-    cat >${SSCLIENT_CONF} <<-EOF
+    cat >"${SSCLIENT_CONF}" <<-EOF
 {
 "server":"${ssserver_ip}",
 "server_port":${ssserver_port},
@@ -1799,19 +1929,19 @@ WantedBy=multi-user.target" >/etc/systemd/system/ssrustlocal.service
 set_local_profile() {
     echo -e "${Info} 开始设置系统全局代理 ..."
 
-    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
     fi
@@ -1823,17 +1953,17 @@ set_local_profile() {
 remove_local_profile() {
     echo -e "${Info} 开始删除系统全局代理 ..."
 
-    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
     fi
 
-    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
     fi
 
-    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
     fi
@@ -1844,19 +1974,19 @@ remove_local_profile() {
 open_privoxy() {
     echo -e "${Info} 打开系统全局代理 ..."
 
-    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
     fi
@@ -1870,19 +2000,19 @@ open_privoxy() {
 close_privoxy() {
     echo -e "${Info} 关闭系统全局代理 ..."
 
-    profile_con=($(sed -n "/http_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export -n http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/https_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
     fi
     echo "export -n https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
 
-    profile_con=($(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}"))
+    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
     if [[ ! -z ${profile_con} ]]; then
         sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
     fi
@@ -1897,13 +2027,13 @@ ins_local_privoxy() {
     echo -e "${Info} 开始安装配置 privoxy ..."
     yum install -y privoxy
 
-    privoxy_con=($(sed -n '/^forward-socks5t/p' "${PRIVOXY_CONF}"))
+    privoxy_con=$(sed -n '/^forward-socks5t/p' "${PRIVOXY_CONF}")
     if [[ ! -z ${privoxy_con} ]]; then
         sed -i "s/^forward-socks5t/#forward-socks5t/g" "${PRIVOXY_CONF}"
     fi
     echo "forward-socks5t   /   ${sslocal_address}:${sslocal_port} ." >>"${PRIVOXY_CONF}"
 
-    privoxy_con=($(sed -n '/^listen-address/p' "${PRIVOXY_CONF}"))
+    privoxy_con=$(sed -n '/^listen-address/p' "${PRIVOXY_CONF}")
     if [[ ! -z ${privoxy_con} ]]; then
         sed -i "s/^listen-address/#listen-address/g" "${PRIVOXY_CONF}"
     fi
@@ -1954,7 +2084,7 @@ ins_online_ss() {
 }
 
 install_ssclient() {
-    [[ -e ${SSCLIENT_FILE} ]] && echo -e "${Error} 检测到 ss-client 已安装！" && setup_ssclient && return
+    [[ -e "${SSCLIENT_FILE}" ]] && echo -e "${Error} 检测到 ss-client 已安装！" && setup_ssclient && return
 
     echo -e "选择 ss-client 安装方式
 ==================================
@@ -2006,6 +2136,12 @@ check_ssclient() {
     setup_ssclient
 }
 
+view_privoxy() {
+    echo -e "${Info} 获取 privoxy 全局代理配置 (/etc/profile) ……"
+    cat "${PROFILE_CONF}" | grep "http_proxy\|https_proxy\|ftp_proxy" && echo
+    setup_ssclient
+}
+
 setup_ssclient() {
     echo -e "安装设置 ss-client & privoxy
 ==================================
@@ -2015,6 +2151,7 @@ ${Green_font_prefix} 3. 查看 ss-client & privoxy 状态 ${Font_color_suffix}
 ———————————————————————————————————
 ${Green_font_prefix} 4. 打开 privoxy 全局代理 ${Font_color_suffix}
 ${Red_font_prefix} 5. 关闭 privoxy 全局代理 ${Font_color_suffix}
+${Green_font_prefix} 6. 查看 privoxy 全局代理 ${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 =================================="
@@ -2035,6 +2172,9 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
     5)
         close_privoxy
         ;;
+    6)
+        view_privoxy
+        ;;
     0)
         Start_Menu
         is_close=true
@@ -2048,10 +2188,12 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 
 do_swap() {
     swap_file="/root/swapfile"
-    echo -e "${Info} 删除 swap 交换分区"
-    #swapoff -a
-    swapoff "${swap_file}"
-    rm -f ${swap_file}
+    if [[ -e "${swap_file}" ]]; then
+        echo -e "${Info} 删除 swap 交换分区"
+        #swapoff -a
+        swapoff "${swap_file}"
+        rm -f "${swap_file}"
+    fi
 
     echo -e "${Info} 创建 swap 交换分区文件"
     #fallocate -l $1G $swap_file
@@ -2077,7 +2219,7 @@ do_swap() {
 add_swapfile() {
     echo -e "${Info} 开始添加 swap 交换分区......"
 
-    read -e -p "请输入你想要创建的交换分区大小(单位GB，默认1GB)(exit退出)：" swapgb
+    read -e -p "请输入你想要创建的交换分区大小(单位GB，默认1GB)(exit或q退出)：" swapgb
     [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu && is_close=true && return
     [[ -z ${swapgb} ]] && swapgb=1
     do_swap ${swapgb}
@@ -2127,7 +2269,7 @@ ${Red_font_prefix}System Set Up 管理脚本 [v${sh_ver}]${Font_color_suffix}
 ${Yellow_font_prefix} 1. 更新本脚本 ${Font_color_suffix}
 ———————————————————————————————————
 ${Green_font_prefix} 2. 添加 swap 交换分区 ${Font_color_suffix}
-${Red_font_prefix} 3. 更换阿里源 ${Font_color_suffix}
+${Red_font_prefix} 3. 设置 repo 源 ${Font_color_suffix}
 ${Green_font_prefix} 4. 更新系统，安装常用工具 ${Font_color_suffix}
 ${Red_font_prefix} 5. 设置 SELinux ${Font_color_suffix}
 ———————————————————————————————————
@@ -2153,7 +2295,7 @@ ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
                 add_swapfile
                 ;;
             3)
-                change_repo
+                set_repo
                 ;;
             4)
                 yum update -y

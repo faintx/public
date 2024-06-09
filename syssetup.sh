@@ -181,9 +181,21 @@ view_repo() {
             cat /etc/yum.repos.d/CentOS-Stream-BaseOS.repo | grep "name\|http"
             cat /etc/yum.repos.d/CentOS-Stream-AppStream.repo | grep "name\|http"
         else
-            cat /etc/yum.repos.d/CentOS-Base.repo | grep "name\|http"
-            cat /etc/yum.repos.d/CentOS-Linux-BaseOS.repo | grep "name\|http"
-            cat /etc/yum.repos.d/CentOS-Linux-AppStream.repo | grep "name\|http"
+            if [[ -e "/etc/yum.repos.d/CentOS-Base.repo" ]]; then
+                cat /etc/yum.repos.d/CentOS-Base.repo | grep "name\|http"
+            fi
+
+            if [[ -e "/etc/yum.repos.d/CentOS-Linux-BaseOS.repo" ]]; then
+                cat /etc/yum.repos.d/CentOS-Linux-BaseOS.repo | grep "name\|http"
+            elif [[ -e "/etc/yum.repos.d/CentOS-BaseOS.repo" ]]; then
+                cat /etc/yum.repos.d/CentOS-BaseOS.repo | grep "name\|http"
+            fi
+
+            if [[ -e "/etc/yum.repos.d/CentOS-Linux-AppStream.repo" ]]; then
+                cat /etc/yum.repos.d/CentOS-Linux-AppStream.repo | grep "name\|http"
+            elif [[ -e "/etc/yum.repos.d/CentOS-AppStream.repo" ]]; then
+                cat /etc/yum.repos.d/CentOS-AppStream.repo | grep "name\|http"
+            fi
         fi
         ;;
     ubuntu | debian)
@@ -341,12 +353,12 @@ install_service() {
 open_firewall_port() {
     install_service firewalld
 
-    if _exists "iptables"; then
+    if [[ ! -z $(systemctl list-unit-files | grep "iptables") ]]; then
+        echo -e "${Info} 停用 iptables，有时会影响 firewalld 启动." && echo
         if systemctl is-active iptables &>/dev/null; then
-            echo -e "${Info} 停用 iptables，有时会影响 firewalld 启动." && echo
             systemctl stop iptables
-            systemctl disable iptables
         fi
+        systemctl disable iptables
     fi
 
     echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
@@ -397,7 +409,13 @@ remove_firewall_port() {
 }
 
 view_firewall_port() {
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
+    if [[ ! -z $(systemctl list-unit-files | grep "firewalld") ]]; then
+        systemctl status firewalld
+    fi
+    echo
+    echo "--------------------"
+    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)."
+    echo "--------------------" && echo
     set_firewall
 }
 
@@ -406,7 +424,7 @@ set_firewall() {
 ==================================
 ${Green_font_prefix} 1. 打开防火墙端口${Font_color_suffix}
 ${Red_font_prefix} 2. 关闭防火墙端口${Font_color_suffix}
-${Green_font_prefix} 3. 查看防火墙端口${Font_color_suffix}
+${Green_font_prefix} 3. 查看防火墙状态${Font_color_suffix}
 ———————————————————————————————————
 ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
 =================================="

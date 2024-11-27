@@ -7,7 +7,7 @@
 * curl
 
   ```bash
-  curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && source syssetup.sh
+  curl -L -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && source syssetup.sh
   ```
 
 * wget

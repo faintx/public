@@ -1,468 +1,1292 @@
 #!/usr/bin/env bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
-export PATH
 
-sh_ver="1.2.8"
-SSHConfig="/etc/ssh/sshd_config"
-#fail2ban_dir="/root/fail2ban/"
-fail2ban_dir="$(pwd)/fail2ban/"
-FOLDER="/etc/ss-rust"
-SSRUST_FILE="/usr/local/bin/ss-rust"
-V2RAY_FILE="/usr/local/bin/v2ray-plugin"
-CONF="/etc/ss-rust/config.json"
-Now_ssrust_ver_File="/etc/ss-rust/ssrust_ver.txt"
-Now_v2ray_ver_File="/etc/ss-rust/v2ray_ver.txt"
-Local="/etc/sysctl.d/local.conf"
-kms_file="/usr/bin/vlmcsd"
-kms_pid="/var/run/vlmcsd.pid"
-Now_kms_ver_File="/var/run/vlmcsd_ver.txt"
-SSCLIENT_FILE="/usr/bin/sslocal"
-SSCLIENT_V2RAY_FILE="/usr/bin/v2ray-plugin"
-SSCLIENT_CONF="/etc/ssclient/local.json"
-PRIVOXY_CONF="/etc/privoxy/config"
-PROFILE_CONF="/etc/profile"
-is_close=false
+shell_version="1.3.0"
 
-Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m" && Yellow_font_prefix="\033[0;33m"
-Info="${Green_font_prefix}[信息]${Font_color_suffix}"
-Error="${Red_font_prefix}[错误]${Font_color_suffix}"
-Tip="${Yellow_font_prefix}[注意]${Font_color_suffix}"
+declare -A osInfo
+
+initEnvironment() {
+    echoType="echo -e"
+    printN=""
+
+    installPackage="apt install -y"
+    # removePackage="apt remove -y"
+    updatePackage="apt update -y"
+    upgradePackage="apt upgrade -y"
+
+    ETC_PROFILE="/etc/profile"
+    FAIL2BAN_DIR="$(pwd)/fail2ban/"
+    KMS_SERVER_FILE="/usr/bin/vlmcsd"
+    KMS_SERVER_PID="/run/vlmcsd.pid"
+    KMS_SERVER_CURRENT_VERSION="/var/run/vlmcsd_ver.txt"
+    VLMCSD_SERVICE_FILE="/etc/systemd/system/vlmcsd.service"
+
+    # config manager
+    readonly XRAY_SERVER_PATH="/usr/local/etc/xray/"
+    readonly XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
+    readonly XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
+
+    is_close=false
+}
+initEnvironment
+
+echoEnhance() {
+    # Function to print text in different colors.
+    # Arguments:
+    #   $1: Color name (e.g., "red", "skyBlue", "green", "white", "magenta", "yellow", etc.)
+    #   ${*:2}: Text to be printed
+
+    case $1 in
+    # 红色 (Red)
+    "red")
+        ${echoType} "\033[31m${printN}${*:2} \033[0m"
+        ;;
+    # 天蓝色 (Sky Blue)
+    "skyBlue")
+        ${echoType} "\033[1;36m${printN}${*:2} \033[0m"
+        ;;
+    # 绿色 (Green)
+    "green")
+        ${echoType} "\033[32m${printN}${*:2} \033[0m"
+        ;;
+    # 白色 (White)
+    "white")
+        ${echoType} "\033[37m${printN}${*:2} \033[0m"
+        ;;
+    # 芒果色 (Magenta)
+    "magenta")
+        ${echoType} "\033[35m${printN}${*:2} \033[0m"
+        ;;
+    # 黄色 (Yellow)
+    "yellow")
+        ${echoType} "\033[33m${printN}${*:2} \033[0m"
+        ;;
+    # 青色 (Cyan)
+    "cyan")
+        ${echoType} "\033[36m${printN}${*:2} \033[0m"
+        ;;
+    # 蓝色 (Blue)
+    "blue")
+        ${echoType} "\033[34m${printN}${*:2} \033[0m"
+        ;;
+    # 粉色 (Pink)
+    "pink")
+        ${echoType} "\033[95m${printN}${*:2} \033[0m"
+        ;;
+    # 灰色 (Gray)
+    "gray")
+        ${echoType} "\033[90m${printN}${*:2} \033[0m"
+        ;;
+    # 银色 (Silver)
+    "silver")
+        ${echoType} "\033[38;5;251m${printN}${*:2} \033[0m"
+        ;;
+    # 黑色 (Black)
+    "black")
+        ${echoType} "\033[30m${printN}${*:2} \033[0m"
+        ;;
+    esac
+}
+
+function _info() {
+    echoEnhance green "[信息] $*"
+    #printf -- "%s" "$@"
+    printf "\n"
+}
+
+function _warn() {
+    echoEnhance yellow "[警告] $*"
+    #printf -- "%s" "$@"
+    printf "\n"
+}
+
+function _error() {
+    echoEnhance red "[错误] $*"
+    #printf -- "%s" "$@"
+    printf "\n"
+    exit 1
+}
+
+function _get_os_info() {
+
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+
+        osInfo[ID]=${ID}
+        osInfo[VERSION_ID]=${VERSION_ID}
+        osInfo[NAME]=${NAME}
+        # shellcheck disable=SC2153
+        osInfo[VERSION]=${VERSION}
+        osInfo[PRETTY_NAME]=${PRETTY_NAME}
+        osInfo[VERSION_CODENAME]=${VERSION_CODENAME}
+
+        osInfo[KERNEL_NAME]=$(uname -s)
+        osInfo[KERNEL_VERSION]=$(uname -v)
+        osInfo[KERNEL_RELEASE]=$(uname -r)
+        osInfo[KERNEL_ARCH]=$(uname -m)
+        osInfo[KERNEL_OS]=$(uname -o)
+    fi
+}
+
+function check_os() {
+    _get_os_info
+    [[ -z "${osInfo[ID]}" ]] && _error "Not supported OS"
+    case "${osInfo[ID]}" in
+    ubuntu)
+        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 20 ] && _error "Not supported OS, please change to Ubuntu 20+ and try again."
+        ;;
+    debian)
+        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 11 ] && _error "Not supported OS, please change to Debian 11+ and try again."
+        ;;
+    centos)
+        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 7 ] && _error "Not supported OS, please change to CentOS 7+ and try again."
+        installPackage="yum install -y"
+        # removePackage="yum remove -y"
+        updatePackage="yum update -y"
+        # upgradePackage="yum upgrade -y"
+        ;;
+    *)
+        _error "Not supported OS"
+        ;;
+    esac
+}
 
 check_root() {
-    [[ $EUID != 0 ]] && echo -e "${Error} 当前非ROOT账号(或没有ROOT权限)，无法继续操作，请更换ROOT账号或使用 ${Green_background_prefix}sudo su${Font_color_suffix} 命令获取临时ROOT权限（执行后可能会提示输入当前账号的密码）。" && return 4
+    [[ $EUID != 0 ]] && _error "当前非ROOT账号(或没有ROOT权限)，无法继续操作，请更换ROOT账号或使用 sudo su 命令获取临时ROOT权限（执行后可能会提示输入当前账号的密码）。"
 }
 
-check_sys() {
-    if [[ -f /etc/redhat-release ]]; then
-        release="centos"
-    elif cat /etc/issue | grep -q -E -i "debian"; then
-        release="debian"
-    elif cat /etc/issue | grep -q -E -i "ubuntu"; then
-        release="ubuntu"
-    elif cat /etc/issue | grep -q -E -i "centos|red hat|redhat"; then
-        release="centos"
-    elif cat /proc/version | grep -q -E -i "debian"; then
-        release="debian"
-    elif cat /proc/version | grep -q -E -i "ubuntu"; then
-        release="ubuntu"
-    elif cat /proc/version | grep -q -E -i "centos|red hat|redhat"; then
-        release="centos"
+check_systemctl() {
+    # if ! systemctl --version >/dev/null 2>&1; then
+    #     _error "系统未安装systemctl"
+    # fi
+
+    # 检查 systemctl 是否存在
+    if ! command -v systemctl &>/dev/null; then
+        _info "systemctl 未安装，正在尝试安装..."
+        # 检查发行版
+        case "${osInfo[ID]}" in
+        debian | ubuntu)
+            _info "检测到 Debian/Ubuntu 系统，安装 systemd..."
+            ${updatePackage}
+            ${installPackage} systemd
+            ;;
+        centos | rhel)
+            _info "检测到 CentOS/RHEL 系统，安装 systemd..."
+            ${updatePackage}
+            ${installPackage} systemd
+            ;;
+        *)
+            _error "不支持的发行版: ${osInfo[ID]}"
+            ;;
+        esac
+    # else
+    #     _info "检测到系统已安装 systemctl，跳过安装..."
     fi
 }
+check_os
+check_root
+check_systemctl
 
-sysArch() {
-    uname=$(uname -m)
-    if [[ "$uname" == "i686" ]] || [[ "$uname" == "i386" ]]; then
-        arch="i686"
-    elif [[ "$uname" == *"armv7"* ]] || [[ "$uname" == "armv6l" ]]; then
-        arch="arm"
-    elif [[ "$uname" == *"armv8"* ]] || [[ "$uname" == "aarch64" ]]; then
-        arch="aarch64"
-    else
-        arch="x86_64"
-    fi
-}
-
-_exists() {
+function _systemctl() {
     local cmd="$1"
-    if eval type type >/dev/null 2>&1; then
-        eval type "$cmd" >/dev/null 2>&1
-    elif command >/dev/null 2>&1; then
-        command -v "$cmd" >/dev/null 2>&1
-    else
-        which "$cmd" >/dev/null 2>&1
+    local server_name="$2"
+    case "${cmd}" in
+    start)
+        _info "正在启动 ${server_name} 服务"
+        systemctl -q is-active "${server_name}" || systemctl -q start "${server_name}"
+        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
+        sleep 2
+
+        # systemctl -q is-active "${server_name}" && _info "已启动 ${server_name} 服务" || _error "${server_name} 启动失败"
+        if systemctl -q is-active "${server_name}"; then
+            _info "已启动 ${server_name} 服务"
+        else
+            _error "${server_name} 启动失败, 请检查日志"
+        fi
+        ;;
+    stop)
+        _info "正在暂停 ${server_name} 服务"
+        systemctl -q is-active "${server_name}" && systemctl -q stop "${server_name}"
+        systemctl -q is-enabled "${server_name}" && systemctl -q disable "${server_name}"
+        sleep 2
+
+        systemctl -q is-active "${server_name}" || _info "已暂停 ${server_name} 服务"
+        ;;
+    restart)
+        _info "正在重启 ${server_name} 服务"
+        # systemctl -q is-active "${server_name}" && systemctl -q restart "${server_name}" || systemctl -q start "${server_name}"
+        if systemctl -q is-active "${server_name}"; then
+            systemctl -q restart "${server_name}"
+        else
+            systemctl -q start "${server_name}"
+        fi
+
+        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
+        sleep 2
+
+        # systemctl -q is-active "${server_name}" && _info "已重启 ${server_name} 服务" || _error "${server_name} 启动失败"
+        if systemctl -q is-active "${server_name}"; then
+            _info "已重启 ${server_name} 服务"
+        else
+            _error "${server_name} 启动失败, 请检查日志"
+        fi
+        ;;
+    reload)
+        _info "正在重载 ${server_name} 服务"
+        # systemctl -q is-active "${server_name}" && systemctl -q reload "${server_name}" || systemctl -q start "${server_name}"
+        if systemctl -q is-active "${server_name}"; then
+            systemctl -q reload "${server_name}"
+        else
+            systemctl -q start "${server_name}"
+        fi
+
+        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
+        sleep 2
+
+        systemctl -q is-active "${server_name}" && _info "已重载 ${server_name} 服务"
+        ;;
+    dr)
+        _info "正在重载 systemd 配置文件"
+        systemctl daemon-reload
+        ;;
+    esac
+}
+
+function _error_detect() {
+    local cmd="$1"
+    _info "${cmd}"
+    if ! eval "${cmd}"; then
+        _error "Execution command (${cmd}) failed, please check it and try again."
     fi
-    local rt=$?
-    return ${rt}
 }
 
-_os() {
-    local os=""
-    [ -f "/etc/debian_version" ] && source /etc/os-release && os="${ID}" && printf -- "%s" "${os}" && return
-    [ -f "/etc/redhat-release" ] && os="centos" && printf -- "%s" "${os}" && return
+update_shell() {
+    _info "当前版本为 [ ${shell_version} ]，开始检测最新版本..."
+    sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'shell_version="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
+    [[ -z "${sh_new_ver}" ]] && _warn "检测最新版本失败 !" && return
+    if [[ ${sh_new_ver} != "${shell_version}" ]]; then
+        echo "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
+        read -rp "(默认:y):" yn
+        [[ -z "${yn}" ]] && yn="y"
+        if [[ ${yn} == [Yy] ]]; then
+            curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && chmod +x syssetup.sh
+            _info "脚本已更新为最新版本[ ${sh_new_ver} ]！"
+            echo "3s后执行新脚本..."
+            sleep 3s
+            is_close=true
+            bash syssetup.sh
+        else
+            _info "已取消..."
+        fi
+    else
+        _info "当前已是最新版本[ ${sh_new_ver} ] ！"
+    fi
 }
 
-_os_full() {
-    [ -f /etc/redhat-release ] && awk '{print ($1,$3~/^[0-9]/?$3:$4)}' /etc/redhat-release && return
-    [ -f /etc/os-release ] && awk -F'[= "]' '/PRETTY_NAME/{print $3,$4,$5}' /etc/os-release && return
-    [ -f /etc/lsb-release ] && awk -F'[="]+' '/DESCRIPTION/{print $2}' /etc/lsb-release && return
+do_swap() {
+
+    swap_file_size="$1"
+
+    # 检查 /proc/swaps 是否存在
+    if [[ ! -f /proc/swaps ]]; then
+        _warn "文件 /proc/swaps 不存在"
+    fi
+
+    # 使用 awk 提取交换文件名，并将其赋值给变量
+    swap_file=$(awk 'NR > 1 { if ($1 ~ /^\/.*$/) print $1 }' /proc/swaps)
+
+    # 检查是否找到了交换文件名
+    if [[ -z "${swap_file}" ]]; then
+        _info "没有找到交换文件"
+    else
+        _info "找到的交换文件名：$swap_file"
+        # rm -rf "${swap_file}"
+    fi
+
+    swap_file="/root/swapfile"
+    if [[ -e "${swap_file}" ]]; then
+        _info "删除 swap 交换分区"
+        #swapoff -a
+        swapoff "${swap_file}"
+        rm -f "${swap_file}"
+    fi
+
+    _info "创建 swap 交换分区文件"
+    #fallocate -l $1G $swap_file
+    if [[ "${swap_file_size}" =~ ^[1-9][0-9]*$ ]]; then
+        _info "将要创建 ${swap_file_size}GB 的 swap 交换分区文件"
+    else
+        _warn "${swap_file_size} 不是一个正整数，默认创建 1GB 的 swap 交换分区文件"
+        swap_file_size=1
+    fi
+
+    dd if=/dev/zero of=${swap_file} bs=1M count=$((swap_file_size * 1024))
+
+    _info "加载 swap 交换分区文件"
+    chmod 600 "${swap_file}"
+    mkswap "${swap_file}"
+    swapon "${swap_file}"
+
+    _info "持久化 swap 交换分区文件"
+    if grep -q "${swap_file}" /etc/fstab; then
+        echo "Persistence flag exists"
+    else
+        echo "${swap_file} swap swap defaults 0 0" >>/etc/fstab
+    fi
+
+    _info "显示 swap 交换分区"
+    swapon --show
+    echo
+    free -h
+    echo
 }
 
-_os_ver() {
-    local main_ver="$(echo $(_os_full) | grep -oE "[0-9.]+")"
-    printf -- "%s" "${main_ver%%.*}"
+config_swapfile() {
+    _info "设置 swap 交换分区"
+    read -rp "请输入 swap 分区大小(单位GB，默认1GB)(q退出):" swap_size
+    [[ $swap_size == "exit" || $swap_size == [Qq] ]] && return
+    [[ -z "${swap_size}" ]] && swap_size=1
+    do_swap "${swap_size}"
 }
 
-change_vault_repo() {
-    case "$(_os)" in
+show_repo() {
+
+    case "${osInfo[ID]}" in
+    debian | ubuntu)
+        _info "当前 repo 源 /etc/apt/sources.list"
+        cat /etc/apt/sources.list
+        ;;
     centos)
         os_version=$(cat /etc/centos-release)
         echo "$os_version"
         if [[ "$os_version" == *"Stream"* ]]; then
-            echo -e "${Info} CentOS Stream 系统不需要切换源."
-            set_repo
-            return
-        fi
-
-        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-        yum clean all && yum makecache
-        ;;
-    ubuntu | debian)
-        echo -e "${Info} 暂不支持该系统."
-        ;;
-    *) ;; # do nothing
-    esac
-    set_repo
-}
-
-change_aliyun_repo() {
-    case "$(_os)" in
-    centos)
-        os_version=$(cat /etc/centos-release)
-        echo "$os_version"
-        if [[ "$os_version" == *"Stream"* ]]; then
-            echo -e "${Info} CentOS Stream 系统不需要切换源."
-            set_repo
-            return
-        fi
-
-        echo "确定要切换至阿里源 ? (y/N)"
-        echo
-        read -e -p "(默认：n)：" unyn
-        [[ -z ${unyn} ]] && unyn="n"
-        if [[ ${unyn} == [Nn] ]]; then
-            set_repo
-            return
-        fi
-
-        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-
-        mv /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.backup
-        if [ -n "$(_os_ver)" ]; then
-            if [ "$(_os_ver)" -eq 7 ]; then
-                echo -e "${Info} 开始切换 CentOS 7 源 ......"
-                curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
-            elif [ "$(_os_ver)" -eq 8 ]; then
-                echo -e "${Info} 开始切换 CentOS 8 源 ......"
-                curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-vault-8.5.2111.repo
-            else
-                echo -e "${Error} 暂不支持该系统版本."
-                mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
-                return
+            if [[ -e "/etc/yum.repos.d/CentOS-Stream-BaseOS.repo" ]]; then
+                grep "name\|http" /etc/yum.repos.d/CentOS-Stream-BaseOS.repo
             fi
 
-            if [[ $? -eq 0 ]]; then
-                #mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
-                #mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
-                yum clean all && yum makecache
-                #yum update -y
-            else
-                echo -e "${Error} 下载 repo 文件失败."
-                mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
+            if [[ -e "/etc/yum.repos.d/CentOS-Stream-AppStream.repo" ]]; then
+                grep "name\|http" /etc/yum.repos.d/CentOS-Stream-AppStream.repo
             fi
-        fi
-        ;;
-    ubuntu | debian)
-        echo -e "${Info} 暂不支持该系统."
-        ;;
-    *) ;; # do nothing
-    esac
-    set_repo
-}
 
-view_repo() {
-    case "$(_os)" in
-    centos)
-        os_version=$(cat /etc/centos-release)
-        echo "$os_version"
-        if [[ "$os_version" == *"Stream"* ]]; then
-            cat /etc/yum.repos.d/CentOS-Stream-BaseOS.repo | grep "name\|http"
-            cat /etc/yum.repos.d/CentOS-Stream-AppStream.repo | grep "name\|http"
+            if [[ -e "/etc/yum.repos.d/centos.repo" ]]; then
+                grep "name\|http" /etc/yum.repos.d/centos.repo
+            fi
         else
             if [[ -e "/etc/yum.repos.d/CentOS-Base.repo" ]]; then
-                cat /etc/yum.repos.d/CentOS-Base.repo | grep "name\|http"
+                grep "name\|http" /etc/yum.repos.d/CentOS-Base.repo
             fi
 
             if [[ -e "/etc/yum.repos.d/CentOS-Linux-BaseOS.repo" ]]; then
-                cat /etc/yum.repos.d/CentOS-Linux-BaseOS.repo | grep "name\|http"
+                grep "name\|http" /etc/yum.repos.d/CentOS-Linux-BaseOS.repo
             elif [[ -e "/etc/yum.repos.d/CentOS-BaseOS.repo" ]]; then
-                cat /etc/yum.repos.d/CentOS-BaseOS.repo | grep "name\|http"
+                grep "name\|http" /etc/yum.repos.d/CentOS-BaseOS.repo
             fi
 
             if [[ -e "/etc/yum.repos.d/CentOS-Linux-AppStream.repo" ]]; then
-                cat /etc/yum.repos.d/CentOS-Linux-AppStream.repo | grep "name\|http"
+                grep "name\|http" /etc/yum.repos.d/CentOS-Linux-AppStream.repo
             elif [[ -e "/etc/yum.repos.d/CentOS-AppStream.repo" ]]; then
-                cat /etc/yum.repos.d/CentOS-AppStream.repo | grep "name\|http"
+                grep "name\|http" /etc/yum.repos.d/CentOS-AppStream.repo
             fi
         fi
         ;;
-    ubuntu | debian)
-        echo -e "${Info} 暂不支持该系统."
-        ;;
-    *) ;; # do nothing
+    *) ;;
     esac
-    set_repo
 }
 
-set_repo() {
-    echo -e "设置 repo 源
-==================================
-${Green_font_prefix} 1. 切换至 vault.centos.org 源 ${Font_color_suffix}
-${Red_font_prefix} 2. 切换至 aliyun 源 ${Font_color_suffix}
-${Green_font_prefix} 3. 查看当前源 ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        change_vault_repo
+set_target_repo() {
+
+    local target_repo="$1"
+    _info "target repo: $target_repo"
+
+    # 备份当前的 sources.list 文件
+    cp -f /etc/apt/sources.list /etc/apt/sources.list.bak
+
+    # 输出备份成功消息
+    _info "当前 sources.list 已备份为 /etc/apt/sources.list.bak"
+
+    # 写入 target repo 到 sources.list
+    _info "正在替换为 target repo ..."
+
+    debian_repolist=$(
+        cat <<'EOF'
+deb https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE main contrib non-free non-free-firmware
+deb-src https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE main contrib non-free non-free-firmware
+
+deb https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE-updates main contrib non-free non-free-firmware
+deb-src https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE-updates main contrib non-free non-free-firmware
+
+deb https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE-backports main contrib non-free non-free-firmware
+deb-src https://TARGET_REPO_ADDRESS/debian/ VERSION_CODENAME_REPLACE-backports main contrib non-free non-free-firmware
+
+deb https://TARGET_REPO_ADDRESS/debian-security VERSION_CODENAME_REPLACE-security main contrib non-free non-free-firmware
+deb-src https://TARGET_REPO_ADDRESS/debian-security VERSION_CODENAME_REPLACE-security main contrib non-free non-free-firmware
+EOF
+    )
+
+    ubuntu_repolist=$(
+        cat <<'EOF'
+deb https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE main restricted universe multiverse
+deb-src https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE main restricted universe multiverse
+
+deb https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-updates main restricted universe multiverse
+deb-src https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-updates main restricted universe multiverse
+
+deb https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-backports main restricted universe multiverse
+deb-src https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-backports main restricted universe multiverse
+
+deb https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-security main restricted universe multiverse
+deb-src https://TARGET_REPO_ADDRESS/ubuntu/ VERSION_CODENAME_REPLACE-security main restricted universe multiverse
+EOF
+    )
+
+    case "${osInfo[ID]}" in
+    debian)
+        case "${osInfo[VERSION_CODENAME]}" in
+        bullseye)
+            modified_repolist="${debian_repolist//VERSION_CODENAME_REPLACE/bullseye}"
+            ;;
+        bookworm | *)
+            modified_repolist="${debian_repolist//VERSION_CODENAME_REPLACE/bookworm}"
+            ;;
+        esac
+        modified_repolist="${modified_repolist//TARGET_REPO_ADDRESS/$target_repo}"
         ;;
-    2)
-        change_aliyun_repo
-        ;;
-    3)
-        view_repo
-        ;;
-    0)
-        Start_Menu
-        is_close=true
+    ubuntu)
+        case "${osInfo[VERSION_CODENAME]}" in
+        focal)
+            modified_repolist="${ubuntu_repolist//VERSION_CODENAME_REPLACE/focal}"
+            ;;
+        jammy)
+            modified_repolist="${ubuntu_repolist//VERSION_CODENAME_REPLACE/jammy}"
+            ;;
+        lunar)
+            modified_repolist="${ubuntu_repolist//VERSION_CODENAME_REPLACE/lunar}"
+            ;;
+        mantic)
+            modified_repolist="${ubuntu_repolist//VERSION_CODENAME_REPLACE/mantic}"
+            ;;
+        noble | *)
+            modified_repolist="${ubuntu_repolist//VERSION_CODENAME_REPLACE/noble}"
+            ;;
+        esac
+        modified_repolist="${modified_repolist//TARGET_REPO_ADDRESS/$target_repo}"
         ;;
     *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        set_repo
+        modified_repolist="${debian_repolist//VERSION_CODENAME_REPLACE/bookworm}"
         ;;
     esac
+
+    # 写入 target repo 到 sources.list
+    echo "${modified_repolist}" | tee /etc/apt/sources.list
+
+    # 更新 APT 软件包列表
+    ${updatePackage}
+
 }
 
-view_selinux() {
-    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
-    echo -e "${Info} SELinux 配置：${selinux_con}"
-    sestatus
-    set_selinux
-}
+set_tuna_tsinghua_repo() {
 
-disable_selinux() {
-    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
-    echo -e "${Info} SELinux 配置：${selinux_con}"
-    if [ ${selinux_con} != "SELINUX=disabled" ]; then
-        #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/selinux/config
-        #echo "SELINUX=disabled" >>/etc/selinux/config
-        sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/selinux/config
-        echo -e "${Info} SELinux 配置已关闭，需要重启生效."
-    fi
-    set_selinux
-}
-
-set_selinux() {
-    echo -e "设置 SELinux
-==================================
-${Green_font_prefix} 1. 查看 SELinux 配置 ${Font_color_suffix}
-${Red_font_prefix} 2. 关闭 SELinux ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        view_selinux
-        ;;
-    2)
-        disable_selinux
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        set_selinux
-        ;;
-    esac
-}
-
-set_ssh_port() {
-    [[ ! -e ${SSHConfig} ]] && echo -e "${Error} SSH 配置文件不存在，请检查！" && return
-
-    selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
-    echo -e "${Info} SELinux 配置：${selinux_con}"
-    if [ ${selinux_con} != "SELINUX=disabled" ]; then
-        echo -e "${Info} SELinux 未关闭，更改 SSH 端口会无法连接."
+    read -rp "确定要切换至清华源?(y/N)(默认:n):" unyn
+    [[ -z "${unyn}" ]] && unyn="n"
+    if [[ ${unyn} != [Yy] ]]; then
+        _info "已取消..."
         return
     fi
 
-    old_IFS=IFS
-    IFS=$'\n'
-    old_port=$(sed -n '/^Port /p' ${SSHConfig})
-    len=${#old_port[*]}
-    echo -e "${Info} 原 SSH 端口:"
-    echo "----------"
-    for ((i = 0; i < $len; i++)); do
-        echo "${old_port[$i]}"
+    set_target_repo "mirrors.tuna.tsinghua.edu.cn"
+
+    _info "源已更换为清华源。"
+}
+
+set_huaweicloud_repo() {
+
+    read -rp "确定要切换至华为云源?(y/N)(默认:n):" unyn
+    [[ -z "${unyn}" ]] && unyn="n"
+    if [[ ${unyn} != [Yy] ]]; then
+        _info "已取消..."
+        return
+    fi
+
+    set_target_repo "mirrors.huaweicloud.com"
+
+    _info "源已更换为华为云源。"
+}
+
+set_tencent_repo() {
+
+    read -rp "确定要切换至腾讯云源?(y/N)(默认:n):" unyn
+    [[ -z "${unyn}" ]] && unyn="n"
+    if [[ ${unyn} != [Yy] ]]; then
+        _info "已取消..."
+        return
+    fi
+
+    set_target_repo "mirrors.tencent.com"
+
+    _info "源已更换为腾讯云源。"
+}
+
+set_vault_centos_repo() {
+
+    os_version=$(cat /etc/centos-release)
+    echo "$os_version"
+    if [[ "$os_version" == *"Stream"* ]]; then
+        _info "CentOS Stream 系统不需要切换源."
+        return
+    fi
+
+    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+    yum clean all && yum makecache
+}
+
+set_aliyun_repo() {
+
+    os_version=$(cat /etc/centos-release)
+    echo "$os_version"
+    if [[ "$os_version" == *"Stream"* ]]; then
+        _info "CentOS Stream 系统不需要切换源."
+        return
+    fi
+
+    echo "确定要切换至阿里源 ? (y/N)"
+    read -rp "(默认:n):" unyn
+    [[ -z "${unyn}" ]] && unyn="n"
+    if [[ ${unyn} == [Nn] ]]; then
+        return
+    fi
+
+    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
+    mv /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.backup
+    if [ -n "${osInfo[VERSION_ID]}" ]; then
+        if [ "${osInfo[VERSION_ID]}" -eq 7 ]; then
+            _info "开始切换 CentOS 7 源 ......"
+            # curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
+            if curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo; then
+                yum clean all && yum makecache
+            else
+                _warn "下载 repo 文件失败."
+                mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
+            fi
+
+        elif [ "${osInfo[VERSION_ID]}" -eq 8 ]; then
+            _info "开始切换 CentOS 8 源 ......"
+            # curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-vault-8.5.2111.repo
+            if curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-vault-8.5.2111.repo; then
+                yum clean all && yum makecache
+            else
+                _warn "下载 repo 文件失败."
+                mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
+            fi
+
+        else
+            _warn "暂不支持该系统版本."
+            mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
+        fi
+
+        # if [[ $? -eq 0 ]]; then
+        #     #mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
+        #     #mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
+        #     yum clean all && yum makecache
+        #     #yum update -y
+        # else
+        #     _warn "下载 repo 文件失败."
+        #     mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
+        # fi
+    fi
+}
+
+make_update_file() {
+
+    # shellcheck disable=SC1078
+    # shellcheck disable=SC2028
+    # shellcheck disable=SC2016
+    # shellcheck disable=SC2026
+    # shellcheck disable=SC1079
+
+    cat <<'EOF' >~/update_mirror.pl
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use autodie;
+
+my $mirrors = 'https://mirrors.tuna.tsinghua.edu.cn/centos-stream';
+
+if (@ARGV < 1) {
+    die "Usage: $0 <filename1> <filename2> ...\n";
+}
+
+while (my $filename = shift @ARGV) {
+    my $backup_filename = $filename . '.bak';
+    rename $filename, $backup_filename;
+
+    open my $input, "<", $backup_filename;
+    open my $output, ">", $filename;
+
+    while (<$input>) {
+        s/^metalink/# metalink/;
+
+        if (m/^name/) {
+            my (undef, $repo, $arch) = split /-/;
+            $repo =~ s/^\s+|\s+$//g;
+            ($arch = defined $arch ? lc($arch) : '') =~ s/^\s+|\s+$//g;
+
+            if ($repo =~ /^Extras/) {
+                $_ .= "baseurl=${mirrors}/SIGs/\$releasever-stream/extras" . ($arch eq 'source' ? "/${arch}/" : "/\$basearch/") . "extras-common\n";
+            } else {
+                $_ .= "baseurl=${mirrors}/\$releasever-stream/$repo" . ($arch eq 'source' ? "/" : "/\$basearch/") . ($arch ne '' ? "${arch}/tree/" : "os") . "\n";
+            }
+        }
+
+        print $output $_;
+    }
+}
+EOF
+
+}
+
+set_centos_tsinghua_repo() {
+
+    # 写入清华源官方 perl 脚本
+    make_update_file
+
+    # 检查 Perl 是否已安装
+    if ! command -v perl >/dev/null 2>&1; then
+        # yum install -y perl
+        ${installPackage} perl --setopt=install_weak_deps=False
+    fi
+
+    perl ~/update_mirror.pl /etc/yum.repos.d/centos*.repo
+    _info "清华源官方 perl 脚本执行完毕.开始 makecache ..."
+
+    yum clean all && yum makecache
+
+    _info "源已更换为清华源。"
+}
+
+config_repo() {
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "设置 repo 源"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 查看当前源"
+        echoEnhance gray "———————————————————————————————————"
+
+        case "${osInfo[ID]}" in
+        debian | ubuntu)
+            echoEnhance silver "2. 切换至 tuna.tsinghua.edu.cn 源"
+            echoEnhance silver "3. 切换至 huaweicloud.com 源"
+            echoEnhance silver "4. 切换至 tencent.com 源"
+            ;;
+        centos)
+            echoEnhance gray "5. 切换至 vault.centos.org 源 (deprecated)"
+            echoEnhance gray "6. 切换至 aliyun 源 (deprecated)"
+            echoEnhance silver "7. 切换至 tuna.tsinghua.edu.cn 源 (CentOS Stream 9)"
+            ;;
+        *) ;;
+        esac
+
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            show_repo
+            ;;
+        2)
+            set_tuna_tsinghua_repo
+            ;;
+        3)
+            set_huaweicloud_repo
+            ;;
+        4)
+            set_tencent_repo
+            ;;
+        5)
+            set_vault_centos_repo
+            ;;
+        6)
+            set_aliyun_repo
+            ;;
+        7)
+            set_centos_tsinghua_repo
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}！请重新输入 ！"
+            ;;
+        esac
     done
-    echo "----------"
-    IFS=old_IFS
+}
+
+init_system() {
+    ${updatePackage}
+    ${upgradePackage}
+    ${installPackage} epel-release
+    ${installPackage} wget curl git gcc automake autoconf libtool make net-tools jq
+}
+
+disable_SELinux() {
+
+    case "${osInfo[ID]}" in
+    debian | ubuntu)
+        _info "Debian/Ubuntu 默认安全模块是 AppArmor. Nothing to do."
+        ;;
+    centos)
+        selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
+        _info "SELinux 配置：${selinux_con}"
+        if [[ "${selinux_con}" != "SELINUX=disabled" ]]; then
+            #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/selinux/config
+            #echo "SELINUX=disabled" >>/etc/selinux/config
+            sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/selinux/config
+            _warn "SELinux 配置已关闭，需要重启生效."
+            read -rp "是否现在重启系统?[Y/n]" is_reboot
+            is_reboot=${is_reboot:-Y}
+            [[ "${is_reboot}" == [Yy] ]] && reboot
+        fi
+        ;;
+    *) ;;
+    esac
+}
+
+check_ssh_port_open() {
+    # 检查 SSH 端口是否开启
+
+    local PORT_TO_OPEN="$1"
+    # _info "需要检查的端口：$PORT_TO_OPEN"
+
+    # 检查 firewalld 是否存在
+    if ! command -v firewall-cmd &>/dev/null; then
+        return 1
+    fi
+
+    # 检查 firewalld 是否正在运行
+    if ! systemctl is-active --quiet firewalld; then
+        return 1
+    fi
+
+    local OPEN_PORTS
+    OPEN_PORTS=$(firewall-cmd --list-ports)
+    # _info "当前防火墙规则：${OPEN_PORTS}"
+
+    if ! echo "${OPEN_PORTS}" | grep -q "${PORT_TO_OPEN}"; then
+        # 打开指定端口
+        if firewall-cmd --zone=public --add-port="${PORT_TO_OPEN}"/tcp --permanent; then
+            _info "成功打开端口 $PORT_TO_OPEN。"
+        else
+            _warn "打开端口 $PORT_TO_OPEN 失败。"
+            return 2
+        fi
+
+        # 重新加载防火墙规则
+        firewall-cmd --reload
+        _info "防火墙规则已重新加载:$(firewall-cmd --list-ports)"
+    fi
+
+    return 0
+
+}
+
+config_ssh() {
+
+    # SSH 配置文件路径
+    SSH_CONFIG="/etc/ssh/sshd_config"
+    [[ ! -e ${SSH_CONFIG} ]] && _warn "${SSH_CONFIG} 配置文件不存在，请检查！" && return
+
+    if [[ "${osInfo[ID]}" == "centos" ]]; then
+        selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
+        _info "SELinux 配置：${selinux_con}"
+        if [[ "${selinux_con}" != "SELINUX=disabled" ]]; then
+            _warn "SELinux 未关闭，更改 SSH 端口会无法连接."
+            return
+        fi
+    fi
+
+    # 检查 sshd.service 或 ssh.service 的启用状态
+    if systemctl is-enabled sshd.service &>/dev/null || systemctl is-enabled ssh.service &>/dev/null; then
+        _info "SSH service already enabled."
+    else
+        _info "SSH service not enabled, enable it now..."
+        # systemctl enable sshd.service 2>/dev/null || systemctl enable ssh.service
+        # if [ $? -eq 0 ]; then
+        #     _info "SSH service successfully enabled."
+        # else
+        #     _warn "enable SSH service failed. please check."
+        #     return
+        # fi
+        if systemctl enable sshd.service &>/dev/null || systemctl enable ssh.service &>/dev/null; then
+            _info "SSH service successfully enabled."
+        else
+            _warn "enable SSH service failed. please check."
+            return
+        fi
+    fi
+
+    # 检查 Port
+    if grep -q "^Port " "${SSH_CONFIG}"; then
+        _info "当前端口设置为: $(grep "^Port " "${SSH_CONFIG}")"
+    else
+        _info "未找到 Port 设置，默认为 22 端口."
+    fi
+
+    read -rp "请输入 SSH 端口号(默认为 22)(q退出):" SSH_PORT
+    [[ ${SSH_PORT} == [Qq] ]] && return
+    SSH_PORT=${SSH_PORT:-22}
+    # expr "${SSH_PORT}" + 0 &>/dev/null
+    if [[ ! "${SSH_PORT}" =~ ^[0-9]+$ || "$SSH_PORT" -le 0 || "$SSH_PORT" -gt 65535 ]]; then
+        _warn "输入了错误的端口:${SSH_PORT}" && echo
+        return
+    else
+        #sed -i "s/Port 22/Port ${sshport}/g" ${SSHConfig}
+        #sed -i '/^Port /s/^\(.*\)$/#\1/g' "$SSHConfig"
+        #echo -e "${Info}屏蔽原 SSH 端口成功 ！" && echo
+
+        if grep -q "^Port " "${SSH_CONFIG}"; then
+            current_port=$(grep "^Port " "${SSH_CONFIG}" | awk '{print $2}')
+            if [[ "${current_port}" != "${SSH_PORT}" ]]; then
+                _info "Port 当前设置为: ${current_port}，正在修改为 ${SSH_PORT}..."
+                check_ssh_port_open "${SSH_PORT}"
+                if [ $? -ne 2 ]; then
+                    sed -i.bak "s/^Port .*/Port $SSH_PORT/" "${SSH_CONFIG}"
+                    _info "已将端口修改为: $SSH_PORT"
+                else
+                    _warn "打开防火墙 firewalld 端口出错，不能修改端口。"
+                fi
+            else
+                _info "端口已设置为: $SSH_PORT，无需修改。"
+            fi
+        else
+            _info "未找到 Port 设置，正在添加..."
+            check_ssh_port_open "${SSH_PORT}"
+            if [ $? -ne 2 ]; then
+                echo "Port $SSH_PORT" >>"${SSH_CONFIG}"
+                _info "已添加 SSH 端口设置为: $SSH_PORT"
+            else
+                _warn "打开防火墙 firewalld 端口出错，不能修改端口。"
+            fi
+        fi
+
+        if ! systemctl restart sshd.service &>/dev/null && ! systemctl restart ssh.service &>/dev/null; then
+            _warn "重启 SSH 服务失败，请检查!"
+        fi
+
+    fi
+
+    # 检查 PermitRootLogin
+    if grep -q "^PermitRootLogin " "${SSH_CONFIG}"; then
+        _info "当前 PermitRootLogin 设置为: $(grep "^PermitRootLogin " "${SSH_CONFIG}")"
+    else
+        case "${osInfo[ID]}" in
+        debian | ubuntu)
+            _info "未找到 PermitRootLogin 设置，默认值：PermitRootLogin prohibit-password."
+            ;;
+        centos)
+            _info "未找到 PermitRootLogin 设置，默认值：PermitRootLogin yes."
+            ;;
+        *) ;;
+        esac
+    fi
+
+    read -rp "设置 SSH 是否允许 root 登录?[Y/n](q退出):" is_allow_root_login
+    [[ ${is_allow_root_login} == [Qq] ]] && return
+    if [[ ${is_allow_root_login} == [Nn] ]]; then
+        YES_NO="no"
+    else
+        YES_NO="yes"
+    fi
+    # 检查并修改 PermitRootLogin
+    if grep -q "^PermitRootLogin " "${SSH_CONFIG}"; then
+        current_permit_root_login=$(grep "^PermitRootLogin " "${SSH_CONFIG}" | awk '{print $2}')
+        if [[ "$current_permit_root_login" != "${YES_NO}" ]]; then
+            _info "PermitRootLogin 当前设置为: $current_permit_root_login，正在修改为 ${YES_NO}..."
+            sed -i.bak "s/^PermitRootLogin .*/PermitRootLogin ${YES_NO}/" "${SSH_CONFIG}"
+            _info "PermitRootLogin 已设置为: ${YES_NO}"
+        else
+            _info "PermitRootLogin 已设置为: ${YES_NO}，无需修改。"
+        fi
+    else
+        _info "未找到 PermitRootLogin 设置，正在添加..."
+        echo "PermitRootLogin ${YES_NO}" >>"${SSH_CONFIG}"
+        _info "已添加 PermitRootLogin 设置为: ${YES_NO}"
+    fi
+    if ! systemctl restart sshd.service &>/dev/null && ! systemctl restart ssh.service &>/dev/null; then
+        _warn "重启 SSH 服务失败，请检查!"
+    fi
+
+    # 检查 PasswordAuthentication
+    if grep -q "^PasswordAuthentication " "${SSH_CONFIG}"; then
+        _info "当前 PasswordAuthentication 设置为: $(grep "^PasswordAuthentication " "${SSH_CONFIG}")"
+    else
+        _info "未找到 PasswordAuthentication 设置，默认为 yes."
+    fi
+
+    read -rp "设置 SSH 是否允许密码登录?[Y/n](q退出):" is_allow_password_login
+    [[ ${is_allow_password_login} == [Qq] ]] && return
+    if [[ ${is_allow_password_login} == [Nn] ]]; then
+        YES_NO="no"
+    else
+        YES_NO="yes"
+    fi
+    # 检查并修改 PasswordAuthentication
+    if grep -q "^PasswordAuthentication " "${SSH_CONFIG}"; then
+        current_password_authentication=$(grep "^PasswordAuthentication " "${SSH_CONFIG}" | awk '{print $2}')
+        if [[ "$current_password_authentication" != "${YES_NO}" ]]; then
+            _info "PasswordAuthentication 当前设置为: $current_password_authentication，正在修改为 ${YES_NO}..."
+            sed -i.bak "s/^PasswordAuthentication .*/PasswordAuthentication ${YES_NO}/" "${SSH_CONFIG}"
+            _info "PasswordAuthentication 已设置为: ${YES_NO}"
+        else
+            _info "PasswordAuthentication 已设置为: ${YES_NO}，无需修改。"
+        fi
+    else
+        _info "未找到 PasswordAuthentication 设置，正在添加..."
+        echo "PasswordAuthentication ${YES_NO}" >>"${SSH_CONFIG}"
+        _info "已添加 PasswordAuthentication 设置为: ${YES_NO}"
+    fi
+    if ! systemctl restart sshd.service &>/dev/null && ! systemctl restart ssh.service &>/dev/null; then
+        _warn "重启 SSH 服务失败，请检查!"
+    fi
+
+    # 检查 PubkeyAuthentication
+    if grep -q "^PubkeyAuthentication " "${SSH_CONFIG}"; then
+        _info "当前 PubkeyAuthentication 设置为: $(grep "^PubkeyAuthentication " "${SSH_CONFIG}")"
+    else
+        _info "未找到 PubkeyAuthentication 设置，默认为 yes."
+    fi
+
+    read -rp "设置 SSH 是否允许公钥登录?[Y/n](q退出):" is_allow_pubkey_login
+    [[ ${is_allow_pubkey_login} == [Qq] ]] && return
+    if [[ ${is_allow_pubkey_login} == [Nn] ]]; then
+        YES_NO="no"
+    else
+        YES_NO="yes"
+    fi
+    # 检查并修改 PubkeyAuthentication
+    if grep -q "^PubkeyAuthentication " "${SSH_CONFIG}"; then
+        current_pubkey_authentication=$(grep "^PubkeyAuthentication " "${SSH_CONFIG}" | awk '{print $2}')
+        if [[ "$current_pubkey_authentication" != "${YES_NO}" ]]; then
+            _info "PubkeyAuthentication 当前设置为: $current_pubkey_authentication，正在修改为 ${YES_NO}..."
+            sed -i.bak "s/^PubkeyAuthentication .*/PubkeyAuthentication ${YES_NO}/" "${SSH_CONFIG}"
+            _info "PubkeyAuthentication 已设置为: ${YES_NO}"
+        else
+            _info "PubkeyAuthentication 已设置为: ${YES_NO}，无需修改。"
+        fi
+    else
+        _info "未找到 PubkeyAuthentication 设置，正在添加..."
+        echo "PubkeyAuthentication ${YES_NO}" >>"${SSH_CONFIG}"
+        _info "已添加 PubkeyAuthentication 设置为: ${YES_NO}"
+    fi
+    if ! systemctl restart sshd.service &>/dev/null && ! systemctl restart ssh.service &>/dev/null; then
+        _warn "重启 SSH 服务失败，请检查!"
+    fi
+
+    # 检查 AuthorizedKeysFile
+    if grep -q "^AuthorizedKeysFile " "${SSH_CONFIG}"; then
+        _info "当前 AuthorizedKeysFile 设置为: $(grep "^AuthorizedKeysFile " "${SSH_CONFIG}")"
+    else
+        _info "未找到 AuthorizedKeysFile 设置，默认为 .ssh/authorized_keys"
+    fi
+
+    read -rp "是否设置 SSH AuthorizedKeysFile?[Y/n](q退出):" is_set_authorized_keys_file
+    [[ ${is_set_authorized_keys_file} == [Qq] ]] && return
+    is_set_authorized_keys_file=${is_set_authorized_keys_file:-Y}
+    if [[ ${is_set_authorized_keys_file} == [Yy] ]]; then
+        # 检查并修改 AuthorizedKeysFile
+        if grep -q "^AuthorizedKeysFile " "${SSH_CONFIG}"; then
+            current_authorized_keys_file=$(grep "^AuthorizedKeysFile " "${SSH_CONFIG}" | awk '{print $2}')
+            if [[ "$current_authorized_keys_file" != ".ssh/authorized_keys" ]]; then
+                _info "AuthorizedKeysFile 当前设置为: $current_authorized_keys_file，正在修改为 .ssh/authorized_keys..."
+                sed -i.bak "s/^AuthorizedKeysFile .*/AuthorizedKeysFile .ssh/authorized_keys/" "${SSH_CONFIG}"
+                _info "AuthorizedKeysFile 已设置为: .ssh/authorized_keys"
+            else
+                _info "AuthorizedKeysFile 已设置为: .ssh/authorized_keys，无需修改。"
+            fi
+        else
+            _info "未找到 AuthorizedKeysFile 设置，正在添加..."
+            echo "AuthorizedKeysFile .ssh/authorized_keys" >>"${SSH_CONFIG}"
+            _info "已添加 AuthorizedKeysFile 设置为: .ssh/authorized_keys"
+        fi
+        if ! systemctl restart sshd.service &>/dev/null && ! systemctl restart ssh.service &>/dev/null; then
+            _warn "重启 SSH 服务失败，请检查!"
+        fi
+    else
+        _info "已取消..."
+    fi
+
+    _info "SSH 配置已完成。"
+}
+
+view_system_proxy() {
+    _info "read ${ETC_PROFILE} proxy config..."
+    grep "http_proxy\|https_proxy\|ftp_proxy" "${ETC_PROFILE}" && echo
+}
+
+open_sysstem_proxy() {
+
+    proxy_address="$1"
+    proxy_protocol="${2}_proxy"
+
+    # # 检查是否已有 proxy 设置（包括被注释掉的情况）
+    # if grep -q "export ${proxy_protocol}=${proxy_address}" "${ETC_PROFILE}"; then
+    #     # 如果存在代理设置，去掉注释符号
+    #     sed -i "s|^#*\(export ${proxy_protocol}=${proxy_address}.*\)|\1|" "${ETC_PROFILE}"
+    #     # 更新代理地址
+    #     sed -i "s|^export ${proxy_protocol}=${proxy_address}.*|export ${proxy_protocol}=${proxy_address}|" "${ETC_PROFILE}"
+    # fi
+
+    sed -i "/export ${proxy_protocol}=/d" "${ETC_PROFILE}"
+
+    # sed -i "/^unset ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
+    sed -i "/unset ${proxy_protocol}/d" "${ETC_PROFILE}"
+
+    # 添加新的设置
+    echo "export ${proxy_protocol}=${proxy_address}" >>"${ETC_PROFILE}"
+
+    _info "open ${proxy_protocol} success."
+}
+
+close_system_proxy() {
+
+    proxy_protocol="${1}_proxy"
+
+    # sed -i "/^export ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
+
+    # # 检查是否已有 unset 设置（包括被注释掉的情况）
+    # if grep -q "unset ${proxy_protocol}" "${ETC_PROFILE}"; then
+    #     # 如果存在 unset 设置，去掉注释符号
+    #     sed -i "s|^#*\(unset ${proxy_protocol}.*\)|\1|" "${ETC_PROFILE}"
+    # else
+    #     # 如果没有 unset 设置，添加新的设置
+    #     echo "unset ${proxy_protocol}" >>"${ETC_PROFILE}"
+    # fi
+
+    sed -i "/export ${proxy_protocol}=/d" "${ETC_PROFILE}"
+
+    # sed -i "/^unset ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
+    sed -i "/unset ${proxy_protocol}/d" "${ETC_PROFILE}"
+
+    # 添加新的设置
+    echo "unset ${proxy_protocol}" >>"${ETC_PROFILE}"
+
+    _info "close ${proxy_protocol} success."
+}
+
+do_system_proxy() {
+    proxy_action="$1"
+
+    if [[ "${proxy_action}" == "on" ]]; then
+        _info "open ${ETC_PROFILE} proxy config..."
+        read -rp "proxy address (eg: [http://127.0.0.1:10809] or [socks5://127.0.0.1:10808] )(q退出):" proxy_address
+        [[ "${proxy_address}" == [Qq] ]] && return
+        open_sysstem_proxy "${proxy_address}" "http"
+        open_sysstem_proxy "${proxy_address}" "https"
+        open_sysstem_proxy "${proxy_address}" "ftp"
+        # echo "http_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
+        # echo "https_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
+        # echo "ftp_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
+    elif [[ "${proxy_action}" == "off" ]]; then
+        close_system_proxy "http"
+        close_system_proxy "https"
+        close_system_proxy "ftp"
+        # _info "删除 ${ETC_PROFILE} 全局代理配置..."
+        # sed -i '/http_proxy/d' "${ETC_PROFILE}"
+        # sed -i '/https_proxy/d' "${ETC_PROFILE}"
+        # sed -i '/ftp_proxy/d' "${ETC_PROFILE}"
+    else
+        _warn "不支持的操作:${proxy_action}"
+    fi
+
+    # shellcheck disable=SC1090
+    source "${ETC_PROFILE}"
+    _warn "如果不能自动生效（使用 source 运行此脚本才会自动生效），请手动执行:source ${ETC_PROFILE}"
+
+}
+
+config_system_proxy() {
 
     while true; do
-        read -e -p "请输入你想要设置的 SSH 端口(1-65535)(exit或q退出设置)：" sshport
-        [[ $sshport == "exit" || $sshport == [Qq] ]] && break
-        expr ${sshport} + 0 &>/dev/null
-        if [[ $? -ne 0 || "$sshport" -le 0 || "$sshport" -gt 65535 ]]; then
-            echo -e "${Error}输入了错误的端口:${sshport}，请重新输入 ！" && echo
-            continue
-        else
-            #sed -i "s/Port 22/Port ${sshport}/g" ${SSHConfig}
-            sed -i '/^Port /s/^\(.*\)$/#\1/g' "$SSHConfig"
-            echo -e "${Info}屏蔽原 SSH 端口成功 ！" && echo
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "config system proxy"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. view system proxy status"
+        echoEnhance silver "2. open system proxy"
+        echoEnhance silver "3. close system proxy"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
 
-            echo "Port ${sshport}" >>"$SSHConfig"
-            echo -e "${Info}设置新的 SSH 端口 成功！"
-            echo "Port ${sshport}" && echo
-            systemctl enable sshd
-            systemctl restart sshd
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            view_system_proxy
+            ;;
+        2)
+            do_system_proxy "on"
+            ;;
+        3)
+            do_system_proxy "off"
+            ;;
+        0)
             break
-        fi
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+
     done
+
 }
 
-install_service() {
-    if ! type "$1" >/dev/null 2>&1; then
-        echo -e "${Info}开始安装 $1 ......"
-        yum install -y "$1"
-    else
-        echo -e "${Info} $1 已安装."
+check_firewalld() {
+
+    # 检查 firewalld 是否存在
+    if ! command -v firewall-cmd &>/dev/null; then
+        _info "firewalld 未安装，正在尝试安装..."
+        ${installPackage} firewalld
     fi
 
-    if systemctl is-active "$1" &>/dev/null; then
-        echo -e "${Info} $1 已启动."
-    else
-        echo -e "${Info}开始启动 $1 ......"
-        systemctl start "$1"
+    # 检查 firewalld 是否正在运行
+    if ! systemctl is-active --quiet firewalld; then
+        systemctl start firewalld
     fi
 
-    if systemctl is-enabled "$1" &>/dev/null; then
-        echo -e "${Info} $1 是开机自启动项."
-    else
-        echo -e "${Info}设置开机启动 $1 ......"
-        systemctl enable "$1"
+    # 检查 firewalld 是否已启用
+    if ! systemctl is-enabled firewalld &>/dev/null; then
+        if systemctl enable firewalld &>/dev/null; then
+            _info "firewalld service already enabled."
+        else
+            _warn "enable firewalld service failed. please check."
+        fi
     fi
+
 }
 
-open_firewall_port() {
-    install_service firewalld
+open_firewalld_port() {
 
-    if [[ ! -z $(systemctl list-unit-files | grep "iptables") ]]; then
-        echo -e "${Info} 停用 iptables，有时会影响 firewalld 启动." && echo
+    if systemctl list-unit-files | grep -q "iptables"; then
+        _info "停用 iptables，有时会影响 firewalld 启动."
         if systemctl is-active iptables &>/dev/null; then
             systemctl stop iptables
         fi
         systemctl disable iptables
     fi
 
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
+    _info "当前已打开端口：$(firewall-cmd --list-ports)."
 
-    while true; do
-        read -e -p "请输入你想要打开 firewalld 端口(1-65535)(exit或q退出设置)：" port
-        [[ $port == "exit" || $port == [Qq] ]] && break
-        expr ${port} + 0 &>/dev/null
-        if [[ $? -ne 0 || "$port" -le 0 || "$port" -gt 65535 ]]; then
-            echo -e "${Error}输入了错误的端口:${port}，请重新输入 ！" && echo
-            continue
-        else
-            echo -e "${Info}打开端口 $port ......"
-            firewall-cmd --zone=public --add-port=$port/tcp --permanent
-            echo -e "${Info}重新加载配置 ......"
-            firewall-cmd --reload
-            continue
-        fi
-    done
+    read -rp "请输入需要打开的端口号(q退出):" open_port
+    [[ "${open_port}" == [Qq] ]] && return
+    if [[ ! "${open_port}" =~ ^[0-9]+$ || "$open_port" -le 0 || "$open_port" -gt 65535 ]]; then
+        _warn "输入了错误的端口号：[ ${open_port} ]"
+    else
+        firewall-cmd --zone=public --add-port="${open_port}"/tcp --permanent
+        firewall-cmd --reload
+        _info "当前已打开端口：$(firewall-cmd --list-ports)."
+    fi
 
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
-    set_firewall
 }
 
-remove_firewall_port() {
-    install_service firewalld
+close_firewalld_port() {
 
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
+    _info "当前已打开端口：$(firewall-cmd --list-ports)."
 
-    while true; do
-        read -e -p "请输入你想要关闭 firewalld 端口(1-65535)(exit或q退出设置)：" port
-        [[ $port == "exit" || $port == [Qq] ]] && break
-        expr ${port} + 0 &>/dev/null
-        if [[ $? -ne 0 || "$port" -le 0 || "$port" -gt 65535 ]]; then
-            echo -e "${Error}输入了错误的端口:${port}，请重新输入 ！" && echo
-            continue
-        else
-            echo -e "${Info}关闭端口 $port ......"
-            firewall-cmd --zone=public --remove-port=$port/tcp --permanent
-            echo -e "${Info}重新加载配置 ......"
-            firewall-cmd --reload
-            continue
-        fi
-    done
+    read -rp "请输入需要关闭的端口号(q退出):" close_port
+    [[ "${close_port}" == [Qq] ]] && return
+    if [[ ! "${close_port}" =~ ^[0-9]+$ || "$close_port" -le 0 || "$close_port" -gt 65535 ]]; then
+        _warn "输入了错误的端口号：[ ${close_port} ]"
+    else
+        firewall-cmd --zone=public --remove-port="${close_port}"/tcp --permanent
+        firewall-cmd --reload
+        _info "当前已打开端口：$(firewall-cmd --list-ports)."
+    fi
 
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)." && echo
-    set_firewall
 }
 
-view_firewall_port() {
-    if [[ ! -z $(systemctl list-unit-files | grep "firewalld") ]]; then
+view_firewalld_status() {
+
+    if systemctl list-unit-files | grep -q "firewalld"; then
         systemctl status firewalld
     fi
+
     echo
-    echo "--------------------"
-    echo -e "${Info} 已打开端口：$(firewall-cmd --zone=public --list-ports)."
-    echo "--------------------" && echo
-    set_firewall
+    _info "当前已打开端口：[ $(firewall-cmd --list-ports) ]"
+
 }
 
-set_firewall() {
-    echo -e "设置 firewalld 防火墙
-==================================
-${Green_font_prefix} 1. 打开防火墙端口${Font_color_suffix}
-${Red_font_prefix} 2. 关闭防火墙端口${Font_color_suffix}
-${Green_font_prefix} 3. 查看防火墙状态${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        open_firewall_port
-        ;;
-    2)
-        remove_firewall_port
-        ;;
-    3)
-        view_firewall_port
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        set_firewall
-        ;;
-    esac
+config_firewalld() {
+
+    check_firewalld
+
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "设置 firewalld"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 打开防火墙端口"
+        echoEnhance silver "2. 关闭防火墙端口"
+        echoEnhance silver "3. 查看防火墙状态"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            open_firewalld_port
+            ;;
+        2)
+            close_firewalld_port
+            ;;
+        3)
+            view_firewalld_status
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+
+    done
 }
 
-ins_ntp_chrony() {
-    if ! _exists "chronyd"; then
-        echo -e "${Info} 开始安装 chrony ......" && echo
-        yum install -y chrony
+install_ntp_chrony() {
+
+    # 检查 chrony 是否存在
+    if ! command -v chronyd &>/dev/null; then
+        _info "chrony 未安装，正在尝试安装..."
+        ${installPackage} chrony
+    fi
+
+    # 检查 chrony 是否正在运行
+    if ! systemctl is-active --quiet chronyd; then
+        systemctl start chronyd
+    fi
+
+    # 检查 chrony 是否已启用
+    if ! systemctl is-enabled chronyd &>/dev/null; then
+        if systemctl enable chronyd &>/dev/null; then
+            _info "chrony service already enabled."
+        else
+            _warn "enable chrony service failed. please check."
+        fi
     fi
 
     ntp_ali=$(sed -n "/^server ntp.aliyun.com/p" /etc/chrony.conf)
-    if [ ! -n "$ntp_ali" ]; then
-        echo -e "${Info} 开始修改配置."
+    if [[ -z "$ntp_ali" ]]; then
+        _info "开始修 NTP chrony 改配置..."
         sed -i 's/^pool/#pool/g' /etc/chrony.conf
         sed -i 's/^server/#server/g' /etc/chrony.conf
         cat >>/etc/chrony.conf <<EOF
-
 # Start custom config
 # add time server address
 server ntp.aliyun.com iburst
@@ -476,254 +1300,296 @@ server ntp7.aliyun.com iburst
 # End custom config
 EOF
     else
-        echo -e "${Info} 配置不用修改."
+        _info "NTP chrony 配置不用修改."
     fi
 
     systemctl restart chronyd
-    systemctl enable chronyd
     timedatectl set-timezone Asia/Shanghai
     chronyc sourcestats -v
+    chronyc -a makestep
+    sleep 2s
     timedatectl
-    systemctl restart rsyslog
-    set_ntp_chrony
+
 }
 
 view_ntp_chrony() {
-    if _exists "chronyd"; then
+
+    if command -v chronyd &>/dev/null; then
         systemctl status chronyd
         chronyc sourcestats -v
+        chronyc -a makestep
+        sleep 2s
         timedatectl
     else
-        echo -e "${Info} NTP chrony 未安装."
+        install_ntp_chrony
     fi
-    set_ntp_chrony
+
 }
 
-set_ntp_chrony() {
-    echo -e "安装设置 NTP chrony
-==================================
-${Green_font_prefix} 1. 安装  NTP chrony ${Font_color_suffix}
-${Red_font_prefix} 2. 查看并同步 NTP chrony ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
+config_ntp_chrony() {
+
+    echo
+    echoEnhance gray "========================================="
+    echoEnhance blue "设置 NTP chrony"
+    echoEnhance gray "========================================="
+    echoEnhance silver "1. 安装 NTP chrony"
+    echoEnhance silver "2. 查看并同步 NTP chrony"
+    echoEnhance gray "———————————————————————————————————"
+    echoEnhance cyan "0. 返回上级菜单"
+    echoEnhance gray "========================================="
+
+    read -rp "请输入序号:" num
     case "${num}" in
     1)
-        ins_ntp_chrony
+        install_ntp_chrony
         ;;
     2)
         view_ntp_chrony
         ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
+    0) ;;
     *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        set_ntp_chrony
+        _warn "输入错误数字:${num} ！"
         ;;
     esac
 
 }
 
-view_python() {
-    if ! type python >/dev/null 2>&1; then
-        echo -e "${Info} 未安装 python."
-    else
-        echo -e "${Info} 已安装 python 版本：$(python --version 2>&1)"
-    fi
+check_python() {
 
-    if ! type python2 >/dev/null 2>&1; then
-        echo -e "${Info} 未安装 python2."
-    else
-        echo -e "${Info} 已安装 python2 版本：$(python2 --version 2>&1)"
-    fi
+    # 检查 Python 是否安装
+    if command -v python3 &>/dev/null; then
+        # 获取 Python 版本
+        version=$(python3 --version 2>&1 | awk '{print $2}')
+        _info "已安装的 Python 版本: $version"
 
-    if ! type python3 >/dev/null 2>&1; then
-        echo -e "${Info} 未安装 python3."
-    else
-        echo -e "${Info} 已安装 python3 版本：$(python3 --version 2>&1)"
-    fi
-
-    echo
-    install_python
-}
-
-install_python_dependency() {
-    yum -y install bzip2-devel sqlite-devel openssl-devel readline-devel gdbm-devel libffi-devel tcl-devel tk-devel
-}
-
-ins_python() {
-    echo "----------"
-    if type python >/dev/null 2>&1; then
-        echo "已安装：$(python --version 2>&1)"
-    fi
-    if type python2 >/dev/null 2>&1; then
-        echo "已安装：$(python2 --version 2>&1)"
-    fi
-    if type python3 >/dev/null 2>&1; then
-        echo "已安装：$(python3 --version 2>&1)"
-    fi
-    echo "----------"
-
-    inscheck=false
-    while true; do
-        read -e -p "请输入要安装的版本(默认3.9.9)(exit或q退出)：" PYTHON_VER
-        [[ $PYTHON_VER == "exit" || $PYTHON_VER == [Qq] ]] && break
-        [[ -z "${PYTHON_VER}" ]] && PYTHON_VER="3.9.9"
-        if [[ $PYTHON_VER =~ ^[2-3]{1}\.[0-9]{1,2}\.[0-9]{1,2}$ ]]; then
-            echo -e "${Info} 版本号 $PYTHON_VER 合法."
-            inscheck=true
-            break
-        elif [[ $PYTHON_VER =~ ^[2-3]{1}\.[0-9]{1,2}$ ]]; then
-            echo -e "${Info} 版本号 $PYTHON_VER 合法."
-            inscheck=true
-            break
-        else
-            echo -e "${Error} 版本号 $PYTHON_VER 不合法!请重新输入!" && echo
-        fi
-    done
-
-    if $inscheck; then
-        echo -e "${Info} 开始安装/配置 依赖......"
-        install_python_dependency
-
-        pv=${PYTHON_VER:0:1}
-        dir=${PYTHON_VER%.*}
-        pythondir="/usr/local/python${dir}"
-        wget https://www.python.org/ftp/python/${PYTHON_VER}/Python-${PYTHON_VER}.tgz
-        if [[ ! -e "Python-${PYTHON_VER}.tgz" ]]; then
-            echo -e "${Error} Python-${PYTHON_VER}.tgz 官方源下载失败！"
+        # 比较版本
+        # if [[ $(echo "$version < 3.9.9" | bc -l) -eq 1 ]]; then
+        # if [[ $(printf '%s\n' "$version" "3.9.9" | sort -V | head -n1) == "$version" ]]; then
+        # if [[ "$version" < "3.9.9" ]]; then
+        if printf "%s\n%s" "$version" "3.9.9" | sort -V | head -n 1 | grep -q "^$version$"; then
+            _info "Python 版本小于 3.9.9，需要安装高版本 Python。"
             return 1
         else
-            tar zxvf Python-${PYTHON_VER}.tgz
-            pushd "Python-${PYTHON_VER}"
-            ./configure --enable-optimizations --prefix="${pythondir}"
-            make && make altinstall
-            popd
-            sudo ldconfig
-            rm -f Python-${PYTHON_VER}.tgz
-
-            ln -fs "${pythondir}/bin/python${dir}" /usr/bin/python${pv}
-            ln -fs "${pythondir}/bin/pip${dir}" /usr/bin/pip${pv}
-        fi
-    fi
-
-    install_python
-}
-
-install_python() {
-    echo -e "安装 python
-==================================
-${Green_font_prefix} 1. 检查 python${Font_color_suffix}
-${Red_font_prefix} 2. 安装 python${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        view_python
-        ;;
-    2)
-        ins_python
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        install_python
-        ;;
-    esac
-}
-
-setup_fail2ban() {
-    echo -e "${Info} 开始 git 下载、编译安装 Fail2Ban ......" && echo
-
-    if [ ! -d "${fail2ban_dir}" ]; then
-        git clone https://github.com/fail2ban/fail2ban.git "${fail2ban_dir}"
-        if [[ $? -eq 0 ]]; then
-            pushd "${fail2ban_dir}"
-            python3 setup.py install
-            popd
-            echo -e "${Tip} Fail2Ban 安装完成，需要设置配置后才能启动运行!!!"
-        else
-            echo -e "${Error} git clone Fail2Ban 官方源下载失败！"
-            echo -e "${Error} 请检查网络，或地址:https://github.com/fail2ban/fail2ban.git"
+            _info "Python 版本满足要求。"
+            return 0
         fi
     else
-        pushd "${fail2ban_dir}"
-        BRANCH=master
-        LOCAL=$(git log $BRANCH -n 1 --pretty=format:"%H")
-        REMOTE=$(git log remotes/origin/$BRANCH -n 1 --pretty=format:"%H")
-        if [ $LOCAL = $REMOTE ]; then
-            echo -e "${Info} Fail2Ban 已安装，不需要更新."
-        else
-            systemctl stop fail2ban
-
-            git submodule update --init --recursive
-            python3 setup.py install
-
-            systemctl start fail2ban
-            systemctl enable fail2ban
-            echo -e "${Info} Fail2Ban 更新完成，已重新启动."
-        fi
-        popd
+        _info "未安装 Python。需要安装高版本 Python。"
+        return 1
     fi
 
-    install_fail2ban
 }
 
-configssh_fail2ban() {
-    echo -e "${Info} 开始配置 Fail2Ban ......" && echo
-    while true; do
-        read -e -p "请输入 SSH 端口(1-65535)(exit或q退出设置)：" sshport
-        [[ $sshport == "exit" || $sshport == [Qq] ]] && break
-        expr ${sshport} + 0 &>/dev/null
-        if [[ $? -ne 0 || "$sshport" -le 0 || "$sshport" -gt 65535 ]]; then
-            echo -e "${Error}输入了错误的端口:${sshport}，请重新输入 ！" && echo
-            continue
+config_python() {
+
+    if check_python; then
+        _info "Python 无需安装。"
+        return
+    fi
+
+    # 询问需要安装的版本号，默认 3.9.9
+    read -rp "请输入要安装的 Python 版本号 (默认 3.9.9): " version_to_install
+    version_to_install=${version_to_install:-3.9.9}
+
+    # 下载和安装指定的 Python 版本
+    _info "正在安装 Python $version_to_install ..."
+
+    case "${osInfo[ID]}" in
+    debian | ubuntu)
+        ${updatePackage}
+        ${installPackage} software-properties-common
+        ${installPackage} "python${version_to_install}"
+        ;;
+    centos)
+        ${updatePackage}
+        ${installPackage} epel-release
+        ${installPackage} "python${version_to_install}"
+        ;;
+    *) ;;
+    esac
+
+    if check_python; then
+        return
+    fi
+
+    _info "开始下载源码，编译安装 Python $version_to_install ..."
+
+    # 设置安装目录
+    install_dir="/usr/local"
+
+    # 安装必要的依赖
+    case "${osInfo[ID]}" in
+    debian | ubuntu)
+        ${updatePackage}
+        ${installPackage} build-essential libssl-dev libbz2-dev libffi-dev \
+            libgdbm-dev liblzma-dev libncurses5-dev libsqlite3-dev \
+            libreadline-dev libtk8.6-dev zlib1g-dev wget
+        ;;
+    centos)
+        ${updatePackage}
+        ${installPackage} gcc make openssl-devel bzip2-devel \
+            libffi-devel zlib-devel wget
+        ;;
+    *) ;;
+    esac
+
+    # 下载指定版本的 Python 源码
+    _info "正在下载 Python $version_to_install 源码..."
+
+    wget "https://www.python.org/ftp/python/$version_to_install/Python-$version_to_install.tgz"
+
+    if [[ ! -e "Python-$version_to_install.tgz" ]]; then
+        _warn "Python-$version_to_install.tgz 官方源下载失败！"
+        return
+    else
+        # 解压源码包
+        _info "正在解压源码包..."
+        tar -xzf "Python-$version_to_install.tgz"
+        if ! cd "Python-$version_to_install"; then
+            _warn "Failed to change directory to Python-$version_to_install"
+            return
+        fi
+
+        # 编译和安装
+        echo "正在编译和安装 Python $version_to_install ..."
+        ./configure --enable-optimizations --prefix=$install_dir
+        make -j"$(nproc)"
+        sudo make altinstall
+
+        # 清理临时文件
+        cd ..
+        rm -rf "Python-$version_to_install" "Python-$version_to_install.tgz"
+
+    fi
+
+    # 检查是否安装成功
+    if check_python; then
+        _info "Python $version_to_install 安装成功!"
+    else
+        _warn "Python $version_to_install 安装失败!"
+    fi
+
+}
+
+check_fail2ban() {
+
+    if ! command -v fail2ban-client &>/dev/null; then
+        return 1
+    fi
+
+    return 0
+}
+
+install_fail2ban() {
+
+    if ! check_fail2ban; then
+
+        if ! check_python; then
+            return
+        fi
+
+        # 安装必要的依赖
+        ${installPackage} python3-setuptools python3-systemd
+
+        _info "尝试安装 Fail2Ban..."
+
+        if [ ! -d "${FAIL2BAN_DIR}" ]; then
+            if git clone https://github.com/fail2ban/fail2ban.git "${FAIL2BAN_DIR}"; then
+                if ! pushd "${FAIL2BAN_DIR}"; then
+                    _warn "进入目录 ${FAIL2BAN_DIR} 失败!"
+                    return
+                fi
+
+                _info "正在编译安装 Fail2Ban..."
+                python3 setup.py install
+
+                if ! popd; then
+                    _error "切换回目录失败,请检查!"
+                fi
+
+                _info "配置 Fail2Ban 启动服务:fail2ban.service" && echo
+                cp "${FAIL2BAN_DIR}build/fail2ban.service" /etc/systemd/system/fail2ban.service
+
+                # site_packages=$(python3 -c "import site; import os; print('\n'.join([p for p in site.getsitepackages() if os.path.isdir(os.path.join(p, 'fail2ban'))]))")
+                site_packages=$(python3 -c "import site; import os; print(next((p for p in site.getsitepackages() if os.path.isdir(os.path.join(p, 'fail2ban'))), ''))")
+
+                # 判断 site_packages 是否不为空，如果为空则不设置环境变量
+                if [ -n "$site_packages" ]; then
+                    sed -i "/^ExecStartPre/i Environment=\"PYTHONPATH=${site_packages}/\"" /etc/systemd/system/fail2ban.service
+                else
+                    _warn "PYTHONPATH 未设置，找不到 /python3.*/site-packages/fail2ban/ 目录，请确认 fail2ban 是否安装正确。"
+                fi
+
+                # f2b_con=$(sed -n "/^ExecStart=/p" "${FAIL2BAN_DIR}build/fail2ban.service" | awk -F"=" '{ print $2 }')
+                # f2b_path=${f2b_con%/*}
+                # ln -fs "${f2b_path}/fail2ban-server" /usr/bin/fail2ban-server
+                # ln -fs "${f2b_path}/fail2ban-client" /usr/bin/fail2ban-client
+
+                _warn "Fail2Ban 安装完成!首次运行前需要修改配置才能正常使用。"
+            else
+                _warn "git clone Fail2Ban 官方源下载失败！"
+                _warn "请检查网络，或地址:https://github.com/fail2ban/fail2ban.git"
+                if [ -d "${FAIL2BAN_DIR}" ]; then
+                    rm -rf "${FAIL2BAN_DIR}"
+                fi
+                return
+            fi
         else
-            echo -e "${Info} 写入 Fail2Ban 配置文件:/etc/fail2ban/jail.local" && echo
+            update_fail2ban
+        fi
+    fi
+
+    JAIL_FILE="/etc/fail2ban/jail.local"
+    # if [ -f "$JAIL_FILE" ]; then
+    #     return
+    # fi
+
+    # 询问是否修改 Fail2Ban 配置
+    read -rp "Fail2Ban 已安装，是否修改配置(Y/n):" yn
+    yn=${yn:-Y}
+    if [[ ${yn} == [Yy] ]]; then
+
+        read -rp "请输入 SSH 端口号(q退出):" port
+        [[ $port == "exit" || $port == [Qq] ]] && return
+        if [[ ! "${port}" =~ ^[0-9]+$ || "$port" -le 0 || "$port" -gt 65535 ]]; then
+            _warn "输入了错误的端口:${port}" && echo
+            return
+        else
+            _info "写入 Fail2Ban 配置文件:${JAIL_FILE}"
             echo "[sshd]
 enabled = true
-port    = ${sshport}
+port    = ${port}
 bantime = 365d
 findtime= 365d
 logpath =/var/log/secure
-maxretry = 2" >/etc/fail2ban/jail.local
-
-            echo -e "${Info} 配置 Fail2Ban 启动服务:fail2ban.service" && echo
-            cp "${fail2ban_dir}build/fail2ban.service" /etc/systemd/system/fail2ban.service
-
-            f2b_con=$(sed -n "/^ExecStart=/p" "${fail2ban_dir}build/fail2ban.service" | awk -F"=" '{ print $2 }')
-            f2b_path=${f2b_con%/*}
-            ln -fs "${f2b_path}/fail2ban-server" /usr/bin/fail2ban-server
-            ln -fs "${f2b_path}/fail2ban-client" /usr/bin/fail2ban-client
+maxretry = 2
+backend = systemd
+" >"${JAIL_FILE}"
 
             systemctl daemon-reload
             systemctl enable fail2ban
             systemctl restart fail2ban
-            systemctl restart rsyslog
-            break
+            # systemctl restart rsyslog
         fi
-    done
+    else
+        _info "已取消 Fail2Ban 配置..."
+    fi
 
-    install_fail2ban
 }
 
-checkssh_fail2ban() {
+view_fail2ban() {
+
     systemctl status fail2ban
-    fail2ban-client status sshd
-    install_fail2ban
+
+    if check_fail2ban; then
+        fail2ban-client status sshd
+    fi
+
 }
 
 # 定义函数来校验IP地址格式是否符合规范
 validate_ip_address() {
-    local ip_address=$1
+    local ip_address="$1"
 
     # 使用正则表达式校验IP地址格式是否符合规范
     if [[ $ip_address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
@@ -733,7 +1599,7 @@ validate_ip_address() {
         # 判断每个数字是否在0-255之间
         valid_ip=true
         for ip_part in "${ip_parts[@]}"; do
-            if (($ip_part < 0 || $ip_part > 255)); then
+            if ((ip_part < 0 || ip_part > 255)); then
                 valid_ip=false
                 break
             fi
@@ -741,865 +1607,266 @@ validate_ip_address() {
 
         # 输出结果
         if [ $valid_ip == true ]; then
-            echo -e "${Info} IP地址 $ip_address 符合规范."
+            _info "IP地址 $ip_address 符合规范."
             return 0 # 返回0表示IP地址符合规范
         else
-            echo -e "${Error} IP地址 $ip_address 不符合规范!请重新输入!" && echo
+            _warn "$IP地址 $ip_address 不符合规范!"
             return 1 # 返回1表示IP地址不符合规范
         fi
     else
-        echo -e "${Error} IP地址 $ip_address 不符合规范!请重新输入!" && echo
+        _warn "IP地址 $ip_address 不符合规范!"
         return 1 # 返回1表示IP地址不符合规范
     fi
 }
 
-upbanip_fail2ban() {
-    while true; do
-        read -e -p "请输入要解封的 IP 地址(exit或q退出)：" IPADDRESS
-        [[ $IPADDRESS == "exit" || $IPADDRESS == [Qq] ]] && break
+unlock_fail2ban() {
+
+    if ! check_fail2ban; then
+        _warn "Fail2Ban 未安装，无法解锁。"
+    else
+
+        read -rp "请输入要解锁的IP地址(q退出):" IPADDRESS
+        [[ $IPADDRESS == "exit" || $IPADDRESS == [Qq] ]] && return
         if (validate_ip_address "${IPADDRESS}"); then
             if ! systemctl is-active fail2ban &>/dev/null; then
-                echo -e "${Info}开始启动 fail2ban ......"
+                _info "开始启动 fail2ban ......"
                 systemctl start fail2ban
             fi
 
-            echo -e "${Info} 解封 IP：${IPADDRESS}"
-            fail2ban-client set sshd unbanip ${IPADDRESS}
+            _info "解封 IP:${IPADDRESS}"
+            fail2ban-client set sshd unbanip "${IPADDRESS}"
+        else
+            _info "已取消操作..."
         fi
-    done
 
-    install_fail2ban
+    fi
 }
 
-install_fail2ban() {
-    #cur_dir=$(pwd)
-    #fail2ban_dir="${cur_dir}/fail2ban/"
+update_fail2ban() {
 
-    echo -e "安装设置 Fail2Ban
-==================================
-${Green_font_prefix} 1. 安装 Fail2Ban${Font_color_suffix}
-${Green_font_prefix} 2. 设置 Fail2Ban${Font_color_suffix}
-${Red_font_prefix} 3. 查看 Fail2Ban SSH 状态${Font_color_suffix}
-${Green_font_prefix} 4. Fail2Ban 解封IP地址${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        setup_fail2ban
-        ;;
-    2)
-        configssh_fail2ban
-        ;;
-    3)
-        checkssh_fail2ban
-        ;;
-    4)
-        upbanip_fail2ban
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        install_fail2ban
-        ;;
-    esac
-}
+    if ! check_fail2ban; then
+        _warn "Fail2Ban 未安装，无法更新。"
+    else
+        if [ ! -d "${FAIL2BAN_DIR}" ]; then
+            _warn "找不到 Fail2Ban 目录，无法更新。"
+        else
+            # pushd "${FAIL2BAN_DIR}" || _warn "进入目录 ${FAIL2BAN_DIR} 失败!" && return
+            if ! pushd "${FAIL2BAN_DIR}"; then
+                _warn "进入目录 ${FAIL2BAN_DIR} 失败!"
+                return
+            fi
 
-check_ssrust_installed() {
-    [[ ! -e ${SSRUST_FILE} ]] && echo -e "${Error} Shadowsocks Rust 没有安装，请检查！" && setup_ssrust && return
-}
-
-check_ssrust_status() {
-    status=$(systemctl status ss-rust | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
-}
-
-Set_ssrust_port() {
-    while true; do
-        echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
-        echo -e "请输入 Shadowsocks Rust 端口 [1-65535]"
-        read -e -p "(默认：2525)：" ssrust_port
-        [[ -z "${ssrust_port}" ]] && ssrust_port=2525
-        echo $((${ssrust_port} + 0)) &>/dev/null
-        if [[ $? -eq 0 ]]; then
-            if [[ ${ssrust_port} -ge 1 ]] && [[ ${ssrust_port} -le 65535 ]]; then
-                echo && echo "=================================="
-                echo -e "${Info} Shadowsocks Rust 端口：${Red_background_prefix}${ssrust_port}${Font_color_suffix}"
-                echo "==================================" && echo
-                break
+            BRANCH=master
+            LOCAL=$(git log $BRANCH -n 1 --pretty=format:"%H")
+            REMOTE=$(git log remotes/origin/$BRANCH -n 1 --pretty=format:"%H")
+            if [ "$LOCAL" = "$REMOTE" ]; then
+                _info "Fail2Ban 已安装最新，不需要更新."
             else
-                echo -e "${Error}输入了错误的端口:${ssrust_port}，请重新输入 ！" && echo
+                systemctl stop fail2ban
+
+                git pull --recurse-submodules
+                # git submodule update --init --recursive
+                python3 setup.py install
+
+                systemctl start fail2ban
+                systemctl enable fail2ban
+                _info "Fail2Ban 更新完成，已重新启动."
             fi
-        else
-            echo -e "${Error}输入了错误的端口:${ssrust_port}，请重新输入 ！" && echo
+
+            if ! popd; then
+                _error "切换回目录失败,请检查!"
+            fi
+
         fi
-    done
-}
-
-# 判断密码复杂度，
-check_passwd_chick() {
-    if echo $1 | egrep "[0-9]" | egrep "[a-z]" | egrep "[A-Z]" | egrep "[^0-Z]" >/dev/null 2>&1; then
-        return 0
-    else
-        return 1
     fi
 }
 
-# 密码长度检测
-check_passwd_lenth() {
-    if (($(echo $1 | wc -L) > 8)); then
-        return 0
-    else
-        return 1
-    fi
-}
+config_fail2ban() {
 
-Set_ssrust_password() {
     while true; do
-        echo "请输入 Shadowsocks Rust 密码 (要求包含大小写，数字，特殊字符)"
-        read -e -p "(默认：随机生成)：" ssrust_password
-        #[[ -z "${ssrust_password}" ]] && ssrust_password=$(tr -dc A-Za-z0-9^0-Z </dev/urandom | head -c 16)
-        if [ ! $ssrust_password ]; then
-            while true; do
-                ssrust_password=$(tr -dc A-Za-z0-9^0-Z </dev/urandom | head -c 16)
-                if (check_passwd_chick "${ssrust_password}"); then
-                    break
-                else
-                    continue
-                fi
-            done
-        fi
-        if (! check_passwd_chick "${ssrust_password}"); then
-            echo -e "${Error} 密码复杂度不够！"
-            echo -e "${Error} 密码必须同时包含大小写，数字，特殊字符！"
-            continue
-        else
-            echo -e "${Info} 密码复杂度符合要求，包含大小写，数字，特殊字符！"
-        fi
-        if (! check_passwd_lenth "${ssrust_password}"); then
-            echo -e "${Error} 您的密码长度不足8位！"
-            continue
-        else
-            echo -e "${Info} 密码长度符合要求！"
-        fi
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "设置 Fail2Ban"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 安装设置 Fail2Ban"
+        echoEnhance silver "2. 查看 Fail2Ban SSH 状态"
+        echoEnhance silver "3. Fail2Ban 解封IP地址"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "4. 更新 Fail2Ban"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
 
-        echo && echo "=================================="
-        echo -e "${Info} Shadowsocks Rust 密码：${Red_background_prefix}${ssrust_password}${Font_color_suffix}"
-        echo "==================================" && echo
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            install_fail2ban
+            ;;
+        2)
+            view_fail2ban
+            ;;
+        3)
+            unlock_fail2ban
+            ;;
+        4)
+            update_fail2ban
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num} ！"
+            ;;
+        esac
 
-        break
+    done
+
+}
+
+system_config() {
+
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "操作系统配置"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 设置 swap 交换分区"
+        echoEnhance silver "2. 设置 repo 源"
+        echoEnhance silver "3. 更新系统，安装常用工具"
+        echoEnhance silver "4. 取消 SELinux"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "5. 设置 SSH"
+        echoEnhance silver "6. 设置 firewalld"
+        echoEnhance silver "7. 设置 NTP chrony"
+        echoEnhance silver "8. 设置 Python3"
+        echoEnhance silver "9. 设置 Fail2Ban"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "66. config system proxy"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            config_swapfile
+            ;;
+        2)
+            config_repo
+            ;;
+        3)
+            init_system
+            ;;
+        4)
+            disable_SELinux
+            ;;
+        5)
+            config_ssh
+            ;;
+        6)
+            config_firewalld
+            ;;
+        7)
+            config_ntp_chrony
+            ;;
+        8)
+            config_python
+            ;;
+        9)
+            config_fail2ban
+            ;;
+        66)
+            config_system_proxy
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
     done
 }
 
-Set_ssrust_cipher() {
-    echo -e "请选择 Shadowsocks Rust 加密方式
-==================================	
- ${Green_font_prefix} 1.${Font_color_suffix} chacha20-ietf-poly1305 ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix} 2.${Font_color_suffix} aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix} 3.${Font_color_suffix} aes-256-gcm ${Green_font_prefix}(默认)${Font_color_suffix}
- ${Green_font_prefix} 4.${Font_color_suffix} plain ${Red_font_prefix}(不推荐)${Font_color_suffix}
- ${Green_font_prefix} 5.${Font_color_suffix} none ${Red_font_prefix}(不推荐)${Font_color_suffix}
- ${Green_font_prefix} 6.${Font_color_suffix} table
- ${Green_font_prefix} 7.${Font_color_suffix} aes-128-cfb
- ${Green_font_prefix} 8.${Font_color_suffix} aes-256-cfb
- ${Green_font_prefix} 9.${Font_color_suffix} aes-256-ctr 
- ${Green_font_prefix}10.${Font_color_suffix} camellia-256-cfb
- ${Green_font_prefix}11.${Font_color_suffix} rc4-md5
- ${Green_font_prefix}12.${Font_color_suffix} chacha20-ietf
-==================================
- ${Tip} AEAD 2022 加密（须v1.15.0及以上版本且密码须经过Base64加密）
-==================================	
- ${Green_font_prefix}13.${Font_color_suffix} 2022-blake3-aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}14.${Font_color_suffix} 2022-blake3-aes-256-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}15.${Font_color_suffix} 2022-blake3-chacha20-poly1305
- ${Green_font_prefix}16.${Font_color_suffix} 2022-blake3-chacha8-poly1305
- ==================================
- ${Tip} 如需其它加密方式请手动修改配置文件 !" && echo
-    read -e -p "(默认: 1. chacha20-ietf-poly1305)：" cipher
-    [[ -z "${cipher}" ]] && cipher="1"
-    if [[ ${cipher} == "1" ]]; then
-        cipher="chacha20-ietf-poly1305"
-    elif [[ ${cipher} == "2" ]]; then
-        cipher="aes-128-gcm"
-    elif [[ ${cipher} == "3" ]]; then
-        cipher="aes-256-gcm"
-    elif [[ ${cipher} == "4" ]]; then
-        cipher="plain"
-    elif [[ ${cipher} == "5" ]]; then
-        cipher="none"
-    elif [[ ${cipher} == "6" ]]; then
-        cipher="table"
-    elif [[ ${cipher} == "7" ]]; then
-        cipher="aes-128-cfb"
-    elif [[ ${cipher} == "8" ]]; then
-        cipher="aes-256-cfb"
-    elif [[ ${cipher} == "9" ]]; then
-        cipher="aes-256-ctr"
-    elif [[ ${cipher} == "10" ]]; then
-        cipher="camellia-256-cfb"
-    elif [[ ${cipher} == "11" ]]; then
-        cipher="arc4-md5"
-    elif [[ ${cipher} == "12" ]]; then
-        cipher="chacha20-ietf"
-    elif [[ ${cipher} == "13" ]]; then
-        cipher="2022-blake3-aes-128-gcm"
-    elif [[ ${cipher} == "14" ]]; then
-        cipher="2022-blake3-aes-256-gcm"
-    elif [[ ${cipher} == "15" ]]; then
-        cipher="2022-blake3-chacha20-poly1305"
-    elif [[ ${cipher} == "16" ]]; then
-        cipher="2022-blake3-chacha8-poly1305"
-    else
-        cipher="aes-256-gcm"
-    fi
-    echo && echo "=================================="
-    echo -e "${Info} 加密方式:${Red_background_prefix}${cipher}${Font_color_suffix}"
-    echo "==================================" && echo
-}
+check_kms_server() {
 
-#开启系统 TCP Fast Open
-enable_systfo() {
-    kernel=$(uname -r | awk -F . '{print $1}')
-    if [ "$kernel" -ge 3 ]; then
-        echo 3 >/proc/sys/net/ipv4/tcp_fastopen
-        [[ ! -e $Local ]] && echo "fs.file-max = 51200
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.core.rmem_default = 65536
-net.core.wmem_default = 65536
-net.core.netdev_max_backlog = 4096
-net.core.somaxconn = 4096
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_tw_recycle = 0
-net.ipv4.tcp_fin_timeout = 30
-net.ipv4.tcp_keepalive_time = 1200
-net.ipv4.ip_local_port_range = 10000 65000
-net.ipv4.tcp_max_syn_backlog = 4096
-net.ipv4.tcp_max_tw_buckets = 5000
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_rmem = 4096 87380 67108864
-net.ipv4.tcp_wmem = 4096 65536 67108864
-net.ipv4.tcp_mtu_probing = 1
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control = bbr" >>/etc/sysctl.d/local.conf && sysctl --system >/dev/null 2>&1
-    else
-        echo -e "${Error}系统内核版本过低，无法支持 TCP Fast Open ！"
-    fi
-}
+    # if ! command -v $KMS_SERVER_FILE &>/dev/null; then
+    #     return 1
+    # fi
 
-disable_tfo() {
-    kernel=$(uname -r | awk -F . '{print $1}')
-    if [ "$kernel" -ge 3 ]; then
-        echo 0 >/proc/sys/net/ipv4/tcp_fastopen
-        [[ -e "$Local" ]] && rm -f /etc/sysctl.d/local.conf && sysctl --system >/dev/null 2>&1
-    else
-        echo -e "${Error}系统内核版本过低，无法支持 TCP Fast Open ！"
-    fi
-
-}
-
-Set_tfo() {
-    echo -e "是否开启 TCP Fast Open ？
-==================================
-${Green_font_prefix} 1. 开启${Font_color_suffix}  ${Red_font_prefix} 2. 关闭${Font_color_suffix}
-=================================="
-    read -e -p "(默认：1.开启)：" tfo
-    [[ -z "${tfo}" ]] && tfo="1"
-    case "${tfo}" in
-    1)
-        tfo=true
-        enable_systfo
-        ;;
-    2)
-        tfo=false
-        disable_tfo
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${tfo}，请重新输入 ！" && echo
-        Set_tfo
-        ;;
-    esac
-
-    echo && echo "=================================="
-    echo -e "TCP Fast Open 开启状态：${Red_background_prefix}${tfo}${Font_color_suffix}"
-    echo "==================================" && echo
-}
-
-Installation_dependency() {
-    if [[ ${release} == "centos" ]]; then
-        yum install jq gzip wget curl unzip xz -y
-    else
-        apt-get install jq gzip wget curl unzip xz-utils -y
-    fi
-    #\cp -f /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-}
-
-check_ssrust_new_ver() {
-    ssrust_new_ver=$(wget -qO- https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases | jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
-    [[ -z ${ssrust_new_ver} ]] && echo -e "${Error} Shadowsocks Rust 最新版本获取失败！" && setup_ssrust && return
-    echo -e "${Info} 检测到 Shadowsocks Rust 最新版本为 [ ${ssrust_new_ver} ]"
-}
-
-check_v2ray_new_ver() {
-    v2ray_new_ver=$(wget -qO- https://api.github.com/repos/shadowsocks/v2ray-plugin/releases | jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
-    [[ -z ${v2ray_new_ver} ]] && echo -e "${Error} Shadowsocks v2ray-plugin 最新版本获取失败！" && setup_ssrust && return
-    echo -e "${Info} 检测到 Shadowsocks v2ray-plugin 最新版本为 [ ${v2ray_new_ver} ]"
-}
-
-official_ssrust_Download() {
-    echo -e "${Info} 默认开始下载官方源 Shadowsocks Rust ……"
-    wget --no-check-certificate -N "https://github.com/shadowsocks/shadowsocks-rust/releases/download/${ssrust_new_ver}/shadowsocks-${ssrust_new_ver}.${arch}-unknown-linux-gnu.tar.xz"
-    if [[ ! -e "shadowsocks-${ssrust_new_ver}.${arch}-unknown-linux-gnu.tar.xz" ]]; then
-        echo -e "${Error} Shadowsocks Rust 官方源下载失败！"
-        return 1
-    else
-        tar -xvf "shadowsocks-${ssrust_new_ver}.${arch}-unknown-linux-gnu.tar.xz"
-    fi
-    if [[ ! -e "ssserver" ]]; then
-        echo -e "${Error} Shadowsocks Rust 解压失败！"
-        echo -e "${Error} Shadowsocks Rust 安装失败 !"
-        return 1
-    else
-        rm -rf "shadowsocks-${ssrust_new_ver}.${arch}-unknown-linux-gnu.tar.xz"
-        chmod +x ssserver
-        mv -f ssserver "${SSRUST_FILE}"
-        rm -f sslocal ssmanager ssservice ssurl
-        echo "${ssrust_new_ver}" >"${Now_ssrust_ver_File}"
-
-        echo -e "${Info} Shadowsocks Rust 主程序下载安装完毕！"
+    if [ -f "${KMS_SERVER_FILE}" ]; then
+        _info "KMS Server 已安装！"
         return 0
     fi
+
+    return 1
+
 }
 
-official_v2ray_Download() {
-    echo -e "${Info} 默认开始下载官方源 Shadowsocks v2ray-plugin ……"
-    wget --no-check-certificate -N "https://github.com/shadowsocks/v2ray-plugin/releases/download/${v2ray_new_ver}/v2ray-plugin-linux-amd64-${v2ray_new_ver}.tar.gz"
-    if [[ ! -e "v2ray-plugin-linux-amd64-${v2ray_new_ver}.tar.gz" ]]; then
-        echo -e "${Error} Shadowsocks v2ray-plugin 官方源下载失败！"
+start_kms_server() {
+
+    if ! check_kms_server; then
+        _warn "未安装 KMS Server！"
         return 1
-    else
-        tar -xvf "v2ray-plugin-linux-amd64-${v2ray_new_ver}.tar.gz"
-    fi
-    if [[ ! -e "v2ray-plugin_linux_amd64" ]]; then
-        echo -e "${Error} Shadowsocks v2ray-plugin 解压失败！"
-        echo -e "${Error} Shadowsocks v2ray-plugin 安装失败 !"
-        return 1
-    else
-        rm -rf "v2ray-plugin-linux-amd64-${v2ray_new_ver}.tar.gz"
-        mv -f v2ray-plugin_linux_amd64 "${V2RAY_FILE}"
-        echo "${v2ray_new_ver}" >"${Now_v2ray_ver_File}"
-
-        echo -e "${Info} Shadowsocks v2ray-plugin 主程序下载安装完毕！"
-        return 0
-    fi
-}
-
-ssrust_Download() {
-    if [[ ! -e "${FOLDER}" ]]; then
-        mkdir "${FOLDER}"
     fi
 
-    if (! official_ssrust_Download); then
-        echo -e "${Error} Shadowsocks Rust 安装失败！"
-    fi
-}
-
-v2ray_Download() {
-    if [[ ! -e "${FOLDER}" ]]; then
-        mkdir "${FOLDER}"
-    fi
-
-    if (! official_v2ray_Download); then
-        echo -e "${Error} Shadowsocks v2ray-plugin 安装失败！"
-    fi
-}
-
-ssrust_Service() {
-    echo "[Unit]
-Description= Shadowsocks Rust Service
-After=network-online.target
-Wants=network-online.target systemd-networkd-wait-online.service
-[Service]
-Type=simple
-Restart=always
-RestartSec=3s
-ExecStartPre=/bin/sh -c 'ulimit -n 51200'
-ExecStart=${SSRUST_FILE} -c ${CONF}
-[Install]
-WantedBy=multi-user.target" >/etc/systemd/system/ss-rust.service
-    systemctl daemon-reload
-    systemctl enable ss-rust
-    echo -e "${Info} Shadowsocks Rust 服务配置完成！"
-}
-
-Write_ssrust_config() {
-    cat >"${CONF}" <<-EOF
-{
-    "server":"::",
-    "server_port":${ssrust_port},
-    "password":"${ssrust_password}",
-    "method":"${cipher}",
-    "fast_open":${tfo},
-    "mode":"tcp_and_udp",
-    "timeout":120,
-    "plugin":"v2ray-plugin",
-    "plugin_opts":"server;path=/admin;loglevel=none"
-}
-EOF
-}
-
-Start_ssrust() {
-    check_ssrust_installed
-    check_ssrust_status
-    [[ "$status" == "running" ]] && echo -e "${Info} Shadowsocks Rust 已在运行 ！" && setup_ssrust && return
-    systemctl start ss-rust
-    check_ssrust_status
-    [[ "$status" == "running" ]] && echo -e "${Info} Shadowsocks Rust 启动成功 ！"
-    sleep 3s
-    setup_ssrust
-}
-
-Stop_ssrust() {
-    check_ssrust_installed
-    check_ssrust_status
-    [[ !"$status" == "running" ]] && echo -e "${Error} Shadowsocks Rust 没有运行，请检查！" && setup_ssrust && return
-    systemctl stop ss-rust
-    sleep 3s
-    setup_ssrust
-}
-
-Restart_ssrust() {
-    check_ssrust_installed
-    systemctl restart ss-rust
-    echo -e "${Info} Shadowsocks Rust 重启完毕 ！"
-    sleep 3s
-    #View
-    setup_ssrust
-}
-
-install_ssrust() {
-    [[ -e "${SSRUST_FILE}" ]] && echo -e "${Error} 检测到 Shadowsocks Rust 已安装！" && setup_ssrust && return
-
-    echo -e "${Info} 开始设置 配置..."
-    Set_ssrust_port
-    Set_ssrust_password
-    Set_ssrust_cipher
-    Set_tfo
-
-    echo -e "${Info} 开始安装/配置 依赖..."
-    Installation_dependency
-
-    echo -e "${Info} 开始下载/安装..."
-    check_ssrust_new_ver
-    check_v2ray_new_ver
-    ssrust_Download
-    v2ray_Download
-
-    echo -e "${Info} 开始安装系统服务脚本..."
-    ssrust_Service
-
-    echo -e "${Info} 开始写入 配置文件..."
-    Write_ssrust_config
-
-    echo -e "${Info} 所有步骤 安装完毕，开始启动..."
-    Start_ssrust
-}
-
-check_ver_comparison() {
-    need_restart="false"
-    check_ssrust_new_ver
-    now_ssrust_ver=$(cat "${Now_ssrust_ver_File}")
-    if [[ "${now_ssrust_ver}" != "${ssrust_new_ver}" ]]; then
-        echo -e "${Info} 发现 Shadowsocks Rust 已有新版本 [ ${ssrust_new_ver} ]，旧版本 [ ${now_ssrust_ver} ]"
-        read -e -p "是否更新 ？ [Y/n]：" yn
-        [[ -z "${yn}" ]] && yn="y"
-        if [[ $yn == [Yy] ]]; then
-            check_ssrust_status
-            [[ "$status" == "running" ]] && systemctl stop ss-rust
-            #\cp "${CONF}" "/tmp/config.json"
-            # rm -rf ${FOLDER}
-            ssrust_Download
-            #mv -f "/tmp/config.json" "${CONF}"
-            need_restart="true"
-        fi
-    else
-        echo -e "${Info} 当前 Shadowsocks Rust 已是最新版本 [ ${ssrust_new_ver} ] ！"
-    fi
-
-    check_v2ray_new_ver
-    now_v2ray_ver=$(cat "${Now_v2ray_ver_File}")
-    if [[ "${now_v2ray_ver}" != "${v2ray_new_ver}" ]]; then
-        echo -e "${Info} 发现 Shadowsocks v2ray-plugin 已有新版本 [ ${v2ray_new_ver} ]，旧版本 [ ${now_v2ray_ver} ]"
-        read -e -p "是否更新 ？ [Y/n]：" yn
-        [[ -z "${yn}" ]] && yn="y"
-        if [[ $yn == [Yy] ]]; then
-            check_ssrust_status
-            [[ "$status" == "running" ]] && systemctl stop ss-rust
-            v2ray_Download
-            need_restart="true"
-        fi
-    else
-        echo -e "${Info} 当前 Shadowsocks v2ray-plugin 已是最新版本 [ ${now_v2ray_ver} ] ！"
-    fi
-
-    if [[ "true" == "${need_restart}" ]]; then
-        systemctl restart ss-rust
-        sleep 3s
-        echo -e "${Info} Shadowsocks Rust 更新完毕！"
-    else
-        echo -e "${Info} Shadowsocks Rust 不需要更新！"
-    fi
-}
-
-update_ssrust() {
-    check_ssrust_installed
-    check_ver_comparison
-    setup_ssrust
-}
-
-uninstall_ssrust() {
-    #check_ssrust_installed
-    echo "确定要卸载 Shadowsocks Rust ? (y/N)"
-    echo
-    read -e -p "(默认：n)：" unyn
-    [[ -z ${unyn} ]] && unyn="n"
-    if [[ ${unyn} == [Yy] ]]; then
-        check_ssrust_status
-        [[ "$status" == "running" ]] && systemctl stop ss-rust
-        systemctl disable ss-rust
-        rm -rf "${FOLDER}"
-        rm -rf "${SSRUST_FILE}"
-        rm -rf "${V2RAY_FILE}"
-        rm -rf /etc/systemd/system/ss-rust.service
-        systemctl daemon-reload
-        echo && echo "Shadowsocks Rust 卸载完成！" && echo
-    else
-        echo && echo "卸载已取消..." && echo
-    fi
-    sleep 3s
-    setup_ssrust
-}
-
-Read_ssrust_config() {
-    [[ ! -e "${CONF}" ]] && echo -e "${Error} Shadowsocks Rust 配置文件不存在！" && setup_ssrust && return
-    ssrust_port=$(cat "${CONF}" | jq -r '.server_port')
-    ssrust_password=$(cat "${CONF}" | jq -r '.password')
-    cipher=$(cat "${CONF}" | jq -r '.method')
-    tfo=$(cat "${CONF}" | jq -r '.fast_open')
-}
-
-set_ssrust_config() {
-    check_ssrust_installed
-    echo && echo -e "你要做什么？
-==================================
- ${Green_font_prefix}1.${Font_color_suffix}  修改 端口配置
- ${Green_font_prefix}2.${Font_color_suffix}  修改 密码配置
- ${Green_font_prefix}3.${Font_color_suffix}  修改 加密配置
- ${Green_font_prefix}4.${Font_color_suffix}  修改 TFO 配置
-———————————————————————————————————
- ${Green_font_prefix}5.${Font_color_suffix}  修改 全部配置
-———————————————————————————————————
- ${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-==================================" && echo
-    read -e -p "(默认：取消)(exit或q退出)：" modify
-    [[ $modify == "exit" || $modify == [Qq] ]] && setup_ssrust
-    [[ -z "${modify}" ]] && echo "已取消..."
-    case "${modify}" in
-    1)
-        Read_ssrust_config
-        Set_ssrust_port
-        Write_ssrust_config
-        Restart_ssrust
-        ;;
-    2)
-        Read_ssrust_config
-        Set_ssrust_password
-        Write_ssrust_config
-        Restart_ssrust
-        ;;
-    3)
-        Read_ssrust_config
-        Set_ssrust_cipher
-        Write_ssrust_config
-        Restart_ssrust
-        ;;
-    4)
-        Read_ssrust_config
-        Set_tfo
-        Write_ssrust_config
-        Restart_ssrust
-        ;;
-    5)
-        Read_ssrust_config
-        Set_ssrust_port
-        Set_ssrust_password
-        Set_ssrust_cipher
-        Set_tfo
-        Write_ssrust_config
-        Restart_ssrust
-        ;;
-    0)
-        setup_ssrust
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        set_ssrust_config
-        ;;
-    esac
-}
-
-getipv4() {
-    ipv4=$(wget -qO- -4 -t1 -T2 ipinfo.io/ip)
-    if [[ -z "${ipv4}" ]]; then
-        ipv4=$(wget -qO- -4 -t1 -T2 api.ip.sb/ip)
-        if [[ -z "${ipv4}" ]]; then
-            ipv4=$(wget -qO- -4 -t1 -T2 members.3322.org/dyndns/getip)
-            if [[ -z "${ipv4}" ]]; then
-                ipv4="IPv4_Error"
-            fi
-        fi
-    fi
-}
-getipv6() {
-    ipv6=$(wget -qO- -6 -t1 -T2 ifconfig.co)
-    if [[ -z "${ipv6}" ]]; then
-        ipv6="IPv6_Error"
-    fi
-}
-
-urlsafe_base64() {
-    date=$(echo -n "$1" | base64 | sed ':a;N;s/\n/ /g;ta' | sed 's/ //g;s/=//g;s/+/-/g;s/\//_/g')
-    echo -e "${date}"
-}
-
-Link_QR() {
-    if [[ "${ipv4}" != "IPv4_Error" ]]; then
-        SSbase64=$(urlsafe_base64 "${cipher}:${ssrust_password}@${ipv4}:${ssrust_port}")
-        SSurl="ss://${SSbase64}"
-        SSQRcode="https://cli.im/api/qrcode/code?text=${SSurl}"
-        link_ipv4=" 链接  [IPv4]：${Red_font_prefix}${SSurl}${Font_color_suffix} \n 二维码[IPv4]：${Red_font_prefix}${SSQRcode}${Font_color_suffix}"
-    fi
-    if [[ "${ipv6}" != "IPv6_Error" ]]; then
-        SSbase64=$(urlsafe_base64 "${cipher}:${ssrust_password}@${ipv6}:${ssrust_port}")
-        SSurl="ss://${SSbase64}"
-        SSQRcode="https://cli.im/api/qrcode/code?text=${SSurl}"
-        link_ipv6=" 链接  [IPv6]：${Red_font_prefix}${SSurl}${Font_color_suffix} \n 二维码[IPv6]：${Red_font_prefix}${SSQRcode}${Font_color_suffix}"
-    fi
-}
-
-view_ssrust_config() {
-    check_ssrust_installed
-    Read_ssrust_config
-    getipv4
-    getipv6
-    #Link_QR
-    clear && echo
-    echo -e "Shadowsocks Rust 配置："
-    echo -e "——————————————————————————————————"
-    [[ "${ipv4}" != "IPv4_Error" ]] && echo -e " 地址：${Green_font_prefix}${ipv4}${Font_color_suffix}"
-    [[ "${ipv6}" != "IPv6_Error" ]] && echo -e " 地址：${Green_font_prefix}${ipv6}${Font_color_suffix}"
-    echo -e " 端口：${Green_font_prefix}${ssrust_port}${Font_color_suffix}"
-    echo -e " 密码：${Green_font_prefix}${ssrust_password}${Font_color_suffix}"
-    echo -e " 加密：${Green_font_prefix}${cipher}${Font_color_suffix}"
-    echo -e " TFO ：${Green_font_prefix}${tfo}${Font_color_suffix}"
-    echo -e "——————————————————————————————————"
-    #[[ ! -z "${link_ipv4}" ]] && echo -e "${link_ipv4}"
-    #[[ ! -z "${link_ipv6}" ]] && echo -e "${link_ipv6}"
-    #echo -e "——————————————————————————————————"
-    setup_ssrust
-}
-
-check_ssrsut() {
-    echo -e "${Info} 获取 Shadowsocks Rust 活动日志 ……"
-    echo -e "${Tip} 返回主菜单请按 q ！"
-    systemctl status ss-rust
-    setup_ssrust
-}
-
-setup_ssrust() {
-    echo -e "安装设置 Shadowsocks Rust
-==================================
-${Green_font_prefix} 1. 安装 Shadowsocks Rust ${Font_color_suffix}
-${Yellow_font_prefix} 2. 更新 Shadowsocks Rust ${Font_color_suffix}
-${Red_font_prefix} 3. 卸载 Shadowsocks Rust ${Font_color_suffix}
-———————————————————————————————————
-${Red_font_prefix} 4. 设置 Shadowsocks Rust 配置信息 ${Font_color_suffix}
-${Green_font_prefix} 5. 查看 Shadowsocks Rust 配置信息 ${Font_color_suffix}
-${Green_font_prefix} 6. 查看 Shadowsocks Rust 运行状态 ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 7. 启动 Shadowsocks Rust ${Font_color_suffix}
-${Red_font_prefix} 8. 停止 Shadowsocks Rust ${Font_color_suffix}
-${Green_font_prefix} 9. 重启 Shadowsocks Rust ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-==================================" && echo
-    if [[ -e "${SSRUST_FILE}" ]]; then
-        check_ssrust_status
-        if [[ "$status" == "running" ]]; then
-            echo -e " 当前状态：${Green_font_prefix} Shadowsocks Rust 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
-        else
-            echo -e " 当前状态：${Green_font_prefix} Shadowsocks Rust 已安装${Font_color_suffix} 但 ${Red_font_prefix}未启动${Font_color_suffix}"
-        fi
-    else
-        echo -e " 当前状态：${Red_font_prefix} Shadowsocks Rust 未安装${Font_color_suffix}"
-    fi
-    echo
-
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        install_ssrust
-        ;;
-    2)
-        update_ssrust
-        ;;
-    3)
-        uninstall_ssrust
-        ;;
-    4)
-        set_ssrust_config
-        ;;
-    5)
-        view_ssrust_config
-        ;;
-    6)
-        check_ssrsut
-        ;;
-    7)
-        Start_ssrust
-        ;;
-    8)
-        Stop_ssrust
-        ;;
-    9)
-        Restart_ssrust
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        setup_ssrust
-        ;;
-    esac
-}
-
-check_kms_installed() {
-    [[ ! -e ${kms_file} ]] && echo -e "${Error} KMS Server 没有安装，请检查！" && setup_kmsserver && return
-}
-
-check_kms_status() {
-    kms_status=$(systemctl status vlmcsd | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
-}
-
-Start_kms() {
-    check_kms_installed
-    check_kms_status
-    [[ "$kms_status" == "running" ]] && echo -e "${Info} KMS Server 已在运行 ！" && setup_kmsserver && return
+    _info "开始启动 KMS Server ..."
     systemctl start vlmcsd
-    check_kms_status
-    [[ "$kms_status" == "running" ]] && echo -e "${Info} KMS Server 启动成功 ！"
     sleep 3s
-    setup_kmsserver
+    _info "KMS Server 启动完成 ！"
+
 }
 
-Stop_kms() {
-    check_kms_installed
-    check_kms_status
-    [[ !"$kms_status" == "running" ]] && echo -e "${Error} KMS Server 没有运行，请检查！" && setup_kmsserver && return
+stop_kms_server() {
+
+    if ! check_kms_server; then
+        _warn "未安装 KMS Server！"
+        return 1
+    fi
+
+    _info "开始停止 KMS Server ..."
     systemctl stop vlmcsd
     sleep 3s
-    setup_kmsserver
+    _info "KMS Server 停止完成 ！"
+
 }
 
-Restart_kms() {
-    check_kms_installed
-    systemctl restart vlmcsd
-    echo -e "${Info} KMS Server 重启完毕 ！"
-    sleep 3s
-    setup_kmsserver
-}
+restart_kms_server() {
 
-Set_kms_port() {
-    while true; do
-        echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
-        echo -e "请输入 KMS Server 端口 [1-65535]"
-        read -e -p "(默认：1688)：" kms_port
-        [[ -z "${kms_port}" ]] && kms_port="1688"
-        echo $((${kms_port} + 0)) &>/dev/null
-        if [[ $? -eq 0 ]]; then
-            if [[ ${kms_port} -ge 1 ]] && [[ ${kms_port} -le 65535 ]]; then
-                echo && echo "=================================="
-                echo -e "${Info} KMS Server 端口：${Red_background_prefix}${kms_port}${Font_color_suffix}"
-                echo "==================================" && echo
-                break
-            else
-                echo -e "${Error}输入了错误的端口:${kms_port}，请重新输入 ！" && echo
-            fi
-        else
-            echo -e "${Error}输入了错误的端口:${kms_port}，请重新输入 ！" && echo
-        fi
-    done
-}
-
-check_kms_new_ver() {
-    kms_new_ver=$(wget -qO- https://api.github.com/repos/Wind4/vlmcsd/releases | jq -r '[.[] | select(.prerelease == false) | select(.draft == false) | .tag_name] | .[0]')
-    [[ -z ${kms_new_ver} ]] && echo -e "${Error} KMS Server 最新版本获取失败！" && setup_kmsserver && return
-    echo -e "${Info} 检测到 KMS Server 最新版本为 [ ${kms_new_ver} ]"
-}
-
-kms_Service() {
-    echo "" >"${kms_pid}"
-    echo "[Unit]
-Description=KMS Server By vlmcsd
-After=syslog.target network.target
-
-[Service]
-Type=forking
-PIDFile=${kms_pid}
-ExecStart=${kms_file} -P${kms_port} -p ${kms_pid}
-ExecReload=/bin/kill -HUP \$MAINPID
-ExecStop=/bin/kill -s QUIT \$MAINPID
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target" >/etc/systemd/system/vlmcsd.service
-    systemctl daemon-reload
-    systemctl enable vlmcsd
-    echo -e "${Info} KMS Server 服务配置完成！"
-}
-
-update_kms() {
-    check_kms_new_ver
-    now_kms_ver=$(cat ${Now_kms_ver_File})
-    if [[ "${now_kms_ver}" != "${kms_new_ver}" ]]; then
-        echo -e "${Info} 发现 KMS Server 已有新版本 [ ${kms_new_ver} ]，旧版本 [ ${now_kms_ver} ]"
-        read -e -p "是否更新 ？ [Y/n]：" yn
-        [[ -z "${yn}" ]] && yn="y"
-        if [[ $yn == [Yy] ]]; then
-            check_kms_status
-            [[ "$kms_status" == "running" ]] && systemctl stop vlmcsd
-            official_kms_Download
-            echo -e "${Info} KMS Server 更新完毕！"
-            sleep 3s
-            Restart_kms
-        fi
-    else
-        echo -e "${Info} 当前 KMS Server 已是最新版本 [ ${kms_new_ver} ] ！"
+    if ! check_kms_server; then
+        _warn "未安装 KMS Server！"
+        return 1
     fi
-    setup_kmsserver
+
+    _info "开始重启 KMS Server ..."
+    systemctl restart vlmcsd
+    sleep 3s
+    _info "KMS Server 重启完成 ！"
+
 }
 
-official_kms_Download() {
-    echo -e "${Info} 默认开始下载官方源 KMS Server ……"
-    wget --no-check-certificate -N "https://github.com/Wind4/vlmcsd/releases/download/${kms_new_ver}/binaries.tar.gz"
+check_kms_new_version() {
+
+    if ! command -v jq &>/dev/null; then
+        ${installPackage} jq
+    fi
+
+    kms_new_version=$(curl -s https://api.github.com/repos/Wind4/vlmcsd/releases | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -n 1)
+    if [[ -z ${kms_new_version} ]]; then
+        _warn "检测 KMS Server 最新版本失败!"
+        return 1
+    fi
+
+    _info "检测到 KMS Server 最新版本为 [ ${kms_new_version} ]"
+    return 0
+}
+
+official_kms_download() {
+
+    _info "开始下载官方 KMS Server ..."
+    wget --no-check-certificate -N "https://github.com/Wind4/vlmcsd/releases/download/${kms_new_version}/binaries.tar.gz"
     if [[ ! -e "binaries.tar.gz" ]]; then
-        echo -e "${Error} KMS Server 官方源下载失败！"
+        _warn "KMS Server 官方源下载失败！"
         return 1
     else
         tar -xvf "binaries.tar.gz"
@@ -1607,754 +1874,951 @@ official_kms_Download() {
 
     vlmcsd_x64_file="./binaries/Linux/intel/static/vlmcsd-x64-musl-static"
     if [[ ! -e "${vlmcsd_x64_file}" ]]; then
-        echo -e "${Error} KMS Server 解压失败！"
-        echo -e "${Error} KMS Server 安装失败 !"
+        _warn "找不到 vlmcsd-x64-musl-static 文件！"
+        _warn "KMS Server 安装失败 !"
         return 1
     else
-        cp "${vlmcsd_x64_file}" "${kms_file}"
-        chmod +x "${kms_file}"
+        cp "${vlmcsd_x64_file}" "${KMS_SERVER_FILE}"
+        chmod +x "${KMS_SERVER_FILE}"
         rm -f binaries.tar.gz
         rm -rf binaries floppy
-        echo "${kms_new_ver}" >"${Now_kms_ver_File}"
+        echo "${kms_new_version}" >"${KMS_SERVER_CURRENT_VERSION}"
 
-        echo -e "${Info} KMS Server 主程序下载安装完毕！"
+        _info "KMS Server 主程序下载安装完毕！"
         return 0
     fi
 }
 
-install_kms() {
-    if [ -f "${kms_file}" ]; then
-        echo -e "${Error} 检测到 KMS Server 已安装！" && setup_kmsserver && return
+config_kms_service() {
+
+    read -rp "请输入 KMS Server 端口号(默认:1688):" kms_port
+    kms_port=${kms_port:-1688}
+    if [[ ! "${kms_port}" =~ ^[0-9]+$ || "$kms_port" -le 100 || "$kms_port" -gt 65535 ]]; then
+        _warn "输入了错误的端口:${kms_port}, 使用默认端口 1688"
+        kms_port=1688
     fi
 
-    check_kms_new_ver
-    Set_kms_port
-    if (! official_kms_Download); then
-        echo -e "${Error} KMS Server 安装失败！"
-    else
-        kms_Service
-        Start_kms
+    _info "检查防火墙，需要打开防火墙端口:${kms_port}"
+    if command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --zone=public --add-port="${kms_port}"/tcp --permanent
+        firewall-cmd --reload
     fi
-}
 
-uninstall_kms() {
-    echo "确定要卸载 KMS Server ? (y/N)"
-    echo
-    read -e -p "(默认：n)：" unyn
-    [[ -z ${unyn} ]] && unyn="n"
-    if [[ ${unyn} == [Yy] ]]; then
-        check_kms_status
-        [[ "$kms_status" == "running" ]] && systemctl stop vlmcsd
-        systemctl disable vlmcsd
-        rm -rf "${kms_file}"
-        rm -rf "${kms_pid}"
-        rm -rf "${Now_kms_ver_File}"
-        rm -rf /etc/systemd/system/vlmcsd.service
-        systemctl daemon-reload
-        echo && echo "KMS Server 卸载完成！" && echo
-    else
-        echo && echo "卸载已取消..." && echo
-    fi
-    sleep 3s
-    setup_kmsserver
-}
-
-view_kms_config() {
-    echo -e "${Info} KMS Server 无配置文件，service文件中配置端口."
-    echo -e "${Info} KMS Server service:/etc/systemd/system/vlmcsd.service"
-    cat /etc/systemd/system/vlmcsd.service
-    setup_kmsserver
-}
-
-check_kms() {
-    echo -e "${Info} 获取 KMS Server 活动日志 ……"
-    echo -e "${Tip} 返回主菜单请按 q ！"
-    systemctl status vlmcsd
-    setup_kmsserver
-}
-
-setup_kmsserver() {
-    echo -e "安装设置 KMS Server
-==================================
-${Green_font_prefix} 1. 安装 KMS Server ${Font_color_suffix}
-${Yellow_font_prefix} 2. 更新 KMS Server ${Font_color_suffix}
-${Red_font_prefix} 3. 卸载 KMS Server ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 4. 查看 KMS Server 配置 ${Font_color_suffix}
-${Green_font_prefix} 5. 查看 KMS Server 运行状态 ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 6. 启动 KMS Server ${Font_color_suffix}
-${Red_font_prefix} 7. 停止 KMS Server ${Font_color_suffix}
-${Green_font_prefix} 8. 重启 KMS Server ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-==================================" && echo
-    if [[ -e "${kms_file}" ]]; then
-        check_kms_status
-        if [[ "$kms_status" == "running" ]]; then
-            echo -e " 当前状态：${Green_font_prefix} KMS Server 已安装${Font_color_suffix} 并 ${Green_font_prefix}已启动${Font_color_suffix}"
-        else
-            echo -e " 当前状态：${Green_font_prefix} KMS Server 已安装${Font_color_suffix} 但 ${Red_font_prefix}未启动${Font_color_suffix}"
-        fi
-    else
-        echo -e " 当前状态：${Red_font_prefix} KMS Server 未安装${Font_color_suffix}"
-    fi
-    echo
-
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        install_kms
-        ;;
-    2)
-        update_kms
-        ;;
-    3)
-        uninstall_kms
-        ;;
-    4)
-        view_kms_config
-        ;;
-    5)
-        check_kms
-        ;;
-    6)
-        Start_kms
-        ;;
-    7)
-        Stop_kms
-        ;;
-    8)
-        Restart_kms
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        setup_kmsserver
-        ;;
-    esac
-}
-
-ins_ss() {
-    echo -e "${Info} 开始安装 ss-client ..."
-    mv -f sslocal "${SSCLIENT_FILE}"
-    rm -f ssserver ssmanager ssservice ssurl
-
-    echo -e "${Info} 开始安装 v2ray-plugin ..."
-    mv -f v2ray-plugin_linux_amd64 "${SSCLIENT_V2RAY_FILE}"
-}
-
-set_ssserver_ip() {
-    while true; do
-        read -e -p "请输入 SS Server 的 IP 地址：" ssserver_ip
-        if (validate_ip_address "${ssserver_ip}"); then
-            echo && echo "=================================="
-            echo -e "${Info} SS Server 的 IP 地址：${Red_background_prefix}${ssserver_ip}${Font_color_suffix}"
-            echo "==================================" && echo
-            break
-        fi
-    done
-}
-
-set_ssserver_port() {
-    while true; do
-        #echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
-        echo -e "请输入 SS Server 的端口 [1-65535]"
-        read -e -p "(默认：2525)：" ssserver_port
-        [[ -z "${ssserver_port}" ]] && ssserver_port="2525"
-        echo $((${ssserver_port} + 0)) &>/dev/null
-        if [[ $? -eq 0 ]]; then
-            if [[ ${ssserver_port} -ge 1 ]] && [[ ${ssserver_port} -le 65535 ]]; then
-                echo && echo "=================================="
-                echo -e "${Info} SS Server 端口：${Red_background_prefix}${ssserver_port}${Font_color_suffix}"
-                echo "==================================" && echo
-                break
-            else
-                echo -e "${Error}输入了错误的端口:${ssserver_port}，请重新输入 ！" && echo
-            fi
-        else
-            echo -e "${Error}输入了错误的端口:${ssserver_port}，请重新输入 ！" && echo
-        fi
-    done
-}
-
-set_ssserver_passwd() {
-    while true; do
-        read -e -p "请输入 SS Server 的密码：" ssserver_passwd
-        [[ -z "${ssserver_passwd}" ]] && echo -e "${Error} 密码不能为空，请重新输入 ！" && continue
-        echo && echo "=================================="
-        echo -e "${Info} SS Server 的密码：${Red_background_prefix}${ssserver_passwd}${Font_color_suffix}"
-        echo "==================================" && echo
-        break
-    done
-}
-
-set_ssserver_cipher() {
-    echo -e "请选择 SS Server 加密方式
-==================================	
- ${Green_font_prefix} 1.${Font_color_suffix} chacha20-ietf-poly1305 ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix} 2.${Font_color_suffix} aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix} 3.${Font_color_suffix} aes-256-gcm ${Green_font_prefix}(默认)${Font_color_suffix}
- ${Green_font_prefix} 4.${Font_color_suffix} plain ${Red_font_prefix}(不推荐)${Font_color_suffix}
- ${Green_font_prefix} 5.${Font_color_suffix} none ${Red_font_prefix}(不推荐)${Font_color_suffix}
- ${Green_font_prefix} 6.${Font_color_suffix} table
- ${Green_font_prefix} 7.${Font_color_suffix} aes-128-cfb
- ${Green_font_prefix} 8.${Font_color_suffix} aes-256-cfb
- ${Green_font_prefix} 9.${Font_color_suffix} aes-256-ctr 
- ${Green_font_prefix}10.${Font_color_suffix} camellia-256-cfb
- ${Green_font_prefix}11.${Font_color_suffix} rc4-md5
- ${Green_font_prefix}12.${Font_color_suffix} chacha20-ietf
-==================================
- ${Tip} AEAD 2022 加密（须v1.15.0及以上版本且密码须经过Base64加密）
-==================================	
- ${Green_font_prefix}13.${Font_color_suffix} 2022-blake3-aes-128-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}14.${Font_color_suffix} 2022-blake3-aes-256-gcm ${Green_font_prefix}(推荐)${Font_color_suffix}
- ${Green_font_prefix}15.${Font_color_suffix} 2022-blake3-chacha20-poly1305
- ${Green_font_prefix}16.${Font_color_suffix} 2022-blake3-chacha8-poly1305
- ==================================
- ${Tip} 如需其它加密方式请手动修改配置文件 !" && echo
-    read -e -p "(默认: 1. chacha20-ietf-poly1305)：" ssserver_cipher
-    [[ -z "${ssserver_cipher}" ]] && ssserver_cipher="1"
-    if [[ ${ssserver_cipher} == "1" ]]; then
-        ssserver_cipher="chacha20-ietf-poly1305"
-    elif [[ ${ssserver_cipher} == "2" ]]; then
-        ssserver_cipher="aes-128-gcm"
-    elif [[ ${ssserver_cipher} == "3" ]]; then
-        ssserver_cipher="aes-256-gcm"
-    elif [[ ${ssserver_cipher} == "4" ]]; then
-        ssserver_cipher="plain"
-    elif [[ ${ssserver_cipher} == "5" ]]; then
-        ssserver_cipher="none"
-    elif [[ ${ssserver_cipher} == "6" ]]; then
-        ssserver_cipher="table"
-    elif [[ ${ssserver_cipher} == "7" ]]; then
-        ssserver_cipher="aes-128-cfb"
-    elif [[ ${ssserver_cipher} == "8" ]]; then
-        ssserver_cipher="aes-256-cfb"
-    elif [[ ${ssserver_cipher} == "9" ]]; then
-        ssserver_cipher="aes-256-ctr"
-    elif [[ ${ssserver_cipher} == "10" ]]; then
-        ssserver_cipher="camellia-256-cfb"
-    elif [[ ${ssserver_cipher} == "11" ]]; then
-        ssserver_cipher="arc4-md5"
-    elif [[ ${ssserver_cipher} == "12" ]]; then
-        ssserver_cipher="chacha20-ietf"
-    elif [[ ${ssserver_cipher} == "13" ]]; then
-        ssserver_cipher="2022-blake3-aes-128-gcm"
-    elif [[ ${ssserver_cipher} == "14" ]]; then
-        ssserver_cipher="2022-blake3-aes-256-gcm"
-    elif [[ ${ssserver_cipher} == "15" ]]; then
-        ssserver_cipher="2022-blake3-chacha20-poly1305"
-    elif [[ ${ssserver_cipher} == "16" ]]; then
-        ssserver_cipher="2022-blake3-chacha8-poly1305"
-    else
-        ssserver_cipher="aes-256-gcm"
-    fi
-    echo && echo "=================================="
-    echo -e "${Info} SS Server 加密方式:${Red_background_prefix}${ssserver_cipher}${Font_color_suffix}"
-    echo "==================================" && echo
-}
-
-set_sslocal_address() {
-    while true; do
-        read -e -p "请输入 SS local 的 IP 地址(默认127.0.0.1)：" sslocal_address
-        [[ -z "${sslocal_address}" ]] && sslocal_address="127.0.0.1"
-        if (validate_ip_address "${sslocal_address}"); then
-            echo && echo "=================================="
-            echo -e "${Info} SS local 的 IP 地址：${Red_background_prefix}${sslocal_address}${Font_color_suffix}"
-            echo "==================================" && echo
-            break
-        fi
-    done
-}
-
-set_sslocal_port() {
-    while true; do
-        #echo -e "${Tip} 本步骤不涉及系统防火墙端口操作，请手动放行相应端口！"
-        echo -e "请输入 SS local 的端口 [1-65535]"
-        read -e -p "(默认1080)：" sslocal_port
-        [[ -z "${sslocal_port}" ]] && sslocal_port="1080"
-        echo $((${sslocal_port} + 0)) &>/dev/null
-        if [[ $? -eq 0 ]]; then
-            if [[ ${sslocal_port} -ge 1 ]] && [[ ${sslocal_port} -le 65535 ]]; then
-                echo && echo "=================================="
-                echo -e "${Info} SS local 端口：${Red_background_prefix}${sslocal_port}${Font_color_suffix}"
-                echo "==================================" && echo
-                break
-            else
-                echo -e "${Error}输入了错误的端口:${sslocal_port}，请重新输入 ！" && echo
-            fi
-        else
-            echo -e "${Error}输入了错误的端口:${sslocal_port}，请重新输入 ！" && echo
-        fi
-    done
-}
-
-Write_ssclient_config() {
-    mkdir "${SSCLIENT_CONF%\/*}"
-    cat >"${SSCLIENT_CONF}" <<-EOF
-{
-"server":"${ssserver_ip}",
-"server_port":${ssserver_port},
-"password":"${ssserver_passwd}",
-"method":"${ssserver_cipher}",
-"fast_open":true,
-"timeout":120,
-"local_address":"${sslocal_address}",
-"local_port":${sslocal_port},
-"plugin":"v2ray-plugin",
-"plugin_opts":"path=/admin;loglevel=none"
-}
-EOF
-}
-
-config_ss() {
-    set_ssserver_ip
-    set_ssserver_port
-    set_ssserver_passwd
-    set_ssserver_cipher
-    set_sslocal_address
-    set_sslocal_port
-    Write_ssclient_config
-    echo -e "${Info} ss-client 配置文件完成:${SSCLIENT_CONF}"
-}
-
-service_ss() {
-    echo "
-[Unit]
-Description=ShadowSocks-rust local service
-After=syslog.target network.target auditd.service
+    echo "" >"${KMS_SERVER_PID}"
+    echo "[Unit]
+Description=KMS Server By vlmcsd
+After=syslog.target network.target
 
 [Service]
-Type=simple
-ExecStart=${SSCLIENT_FILE} -c ${SSCLIENT_CONF}
+Type=forking
+#PIDFile=${KMS_SERVER_PID}
+ExecStart=${KMS_SERVER_FILE} -P${kms_port} -p ${KMS_SERVER_PID}
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -s QUIT \$MAINPID
 PrivateTmp=true
 
 [Install]
-WantedBy=multi-user.target" >/etc/systemd/system/ssrustlocal.service
-    #SSCLIENT_SERVICE="/etc/systemd/system/ssrustlocal.service"
+WantedBy=multi-user.target
+" >"${VLMCSD_SERVICE_FILE}"
 
     systemctl daemon-reload
-    systemctl enable ssrustlocal
-    echo -e "${Info} ss-client 服务配置完成！服务名:ssrustlocal.service"
-}
-
-set_local_profile() {
-    echo -e "${Info} 开始设置系统全局代理 ..."
-
-    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    source "${PROFILE_CONF}"
-}
-
-remove_local_profile() {
-    echo -e "${Info} 开始删除系统全局代理 ..."
-
-    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
-    fi
-
-    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
-    fi
-
-    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
-    fi
-
-    source "${PROFILE_CONF}"
-}
-
-open_privoxy() {
-    echo -e "${Info} 打开系统全局代理 ..."
-
-    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    source "${PROFILE_CONF}"
-    echo -e "${Info} 已经打开系统全局代理."
-    setup_ssclient
-}
-
-close_privoxy() {
-    echo -e "${Info} 关闭系统全局代理 ..."
-
-    profile_con=$(sed -n "/http_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/http_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export -n http_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/https_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/https_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export -n https_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    profile_con=$(sed -n "/ftp_proxy=http/p" "${PROFILE_CONF}")
-    if [[ ! -z ${profile_con} ]]; then
-        sed -i "/ftp_proxy=http/d" "${PROFILE_CONF}"
-    fi
-    echo "export -n ftp_proxy=http://127.0.0.1:8118" >>"${PROFILE_CONF}"
-
-    source "${PROFILE_CONF}"
-    echo -e "${Info} 已经关闭系统全局代理."
-    setup_ssclient
-}
-
-ins_local_privoxy() {
-    echo -e "${Info} 开始安装配置 privoxy ..."
-    yum install -y privoxy
-
-    privoxy_con=$(sed -n '/^forward-socks5t/p' "${PRIVOXY_CONF}")
-    if [[ ! -z ${privoxy_con} ]]; then
-        sed -i "s/^forward-socks5t/#forward-socks5t/g" "${PRIVOXY_CONF}"
-    fi
-    echo "forward-socks5t   /   ${sslocal_address}:${sslocal_port} ." >>"${PRIVOXY_CONF}"
-
-    privoxy_con=$(sed -n '/^listen-address/p' "${PRIVOXY_CONF}")
-    if [[ ! -z ${privoxy_con} ]]; then
-        sed -i "s/^listen-address/#listen-address/g" "${PRIVOXY_CONF}"
-    fi
-    echo "listen-address  127.0.0.1:8118" >>"${PRIVOXY_CONF}"
-
-    systemctl restart privoxy
-    systemctl enable privoxy
+    systemctl enable vlmcsd
+    _info "KMS Server 服务配置完成！"
 
 }
 
-ins_local_ss() {
-    echo -e "${Info} 开始安装/配置 依赖..."
-    #Installation_dependency
+install_kms_server() {
 
-    read -e -p "(请输入本地 Shadowsocks Rust 文件名)：" ssclientfile
-    [[ -z "${ssclientfile}" ]] && ssclientfile="shadowsocks-v1.17.0.x86_64-unknown-linux-gnu.tar.xz"
+    if ! check_kms_server; then
 
-    read -e -p "(请输入本地 v2ray-plugin 文件名)：" v2rayclientfile
-    [[ -z "${v2rayclientfile}" ]] && v2rayclientfile="v2ray-plugin-linux-amd64-v1.3.2.tar.gz"
-
-    tar -xvf "${ssclientfile}"
-    tar -xvf "${v2rayclientfile}"
-
-    if [[ ! -e "sslocal" ]]; then
-        echo -e "${Error} 未找到 sslocal 文件，安装失败！"
-        setup_ssclient
-    fi
-    if [[ ! -e "v2ray-plugin_linux_amd64" ]]; then
-        echo -e "${Error} 未找到 sslocal 文件，安装失败！"
-        setup_ssclient
-    fi
-
-    ins_ss
-    config_ss
-    service_ss
-    systemctl start ssrustlocal
-
-    ins_local_privoxy
-    set_local_profile
-
-    echo -e "${Info} 安装完成."
-    setup_ssclient
-}
-
-ins_online_ss() {
-    echo -e "${Info} 在线安装 ss-client 暂未实现..."
-    install_ssclient
-}
-
-install_ssclient() {
-    [[ -e "${SSCLIENT_FILE}" ]] && echo -e "${Error} 检测到 ss-client 已安装！" && setup_ssclient && return
-
-    echo -e "选择 ss-client 安装方式
-==================================
-${Green_font_prefix} 1. 在线安装 ss-client ${Font_color_suffix}
-${Red_font_prefix} 2. 本地安装 ss-client ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        ins_online_ss
-        ;;
-    2)
-        ins_local_ss
-        ;;
-    0)
-        setup_ssclient
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        install_ssclient
-        ;;
-    esac
-
-}
-
-uninstall_ssclient() {
-    systemctl stop ssrustlocal
-    systemctl disable ssrustlocal
-    rm -f "${SSCLIENT_FILE}"
-    rm -f "${SSCLIENT_V2RAY_FILE}"
-    rm -rf "${SSCLIENT_CONF%\/*}"
-    rm -f /etc/systemd/system/ssrustlocal.service
-
-    systemctl stop privoxy
-    systemctl disable privoxy
-    yum remove -y privoxy
-    rm -f "${PRIVOXY_CONF}"
-    remove_local_profile
-    setup_ssclient
-}
-
-check_ssclient() {
-    echo -e "${Info} 获取 ss-client & privoxy 活动日志 ……"
-    echo -e "${Tip} 返回主菜单请按 q ！"
-    systemctl status ssrustlocal
-    systemctl status privoxy
-    setup_ssclient
-}
-
-view_privoxy() {
-    echo -e "${Info} 获取 privoxy 全局代理配置 (/etc/profile) ……"
-    cat "${PROFILE_CONF}" | grep "http_proxy\|https_proxy\|ftp_proxy" && echo
-    setup_ssclient
-}
-
-setup_ssclient() {
-    echo -e "安装设置 ss-client & privoxy
-==================================
-${Green_font_prefix} 1. 安装 ss-client & privoxy ${Font_color_suffix}
-${Red_font_prefix} 2. 卸载 ss-client & privoxy ${Font_color_suffix}
-${Green_font_prefix} 3. 查看 ss-client & privoxy 状态 ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 4. 打开 privoxy 全局代理 ${Font_color_suffix}
-${Red_font_prefix} 5. 关闭 privoxy 全局代理 ${Font_color_suffix}
-${Green_font_prefix} 6. 查看 privoxy 全局代理 ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-=================================="
-    read -e -p "(请输入序号)：" num
-    case "${num}" in
-    1)
-        install_ssclient
-        ;;
-    2)
-        uninstall_ssclient
-        ;;
-    3)
-        check_ssclient
-        ;;
-    4)
-        open_privoxy
-        ;;
-    5)
-        close_privoxy
-        ;;
-    6)
-        view_privoxy
-        ;;
-    0)
-        Start_Menu
-        is_close=true
-        ;;
-    *)
-        echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-        setup_ssclient
-        ;;
-    esac
-}
-
-do_swap() {
-    swap_file="/root/swapfile"
-    if [[ -e "${swap_file}" ]]; then
-        echo -e "${Info} 删除 swap 交换分区"
-        #swapoff -a
-        swapoff "${swap_file}"
-        rm -f "${swap_file}"
-    fi
-
-    echo -e "${Info} 创建 swap 交换分区文件"
-    #fallocate -l $1G $swap_file
-    dd if=/dev/zero of=${swap_file} bs=1M count=$(($1 * 1024))
-
-    echo -e "${Info} 加载 swap 交换分区文件"
-    chmod 600 "${swap_file}"
-    mkswap "${swap_file}"
-    swapon "${swap_file}"
-
-    echo -e "${Info} 持久化 swap 交换分区文件"
-    if grep -q "${swap_file}" /etc/fstab; then
-        echo "Flag exists"
-    else
-        echo "${swap_file} swap swap defaults 0 0" >>/etc/fstab
-    fi
-
-    echo -e "${Info} 显示 swap 交换分区"
-    swapon --show
-    free -h
-}
-
-add_swapfile() {
-    echo -e "${Info} 开始添加 swap 交换分区......"
-
-    read -e -p "请输入你想要创建的交换分区大小(单位GB，默认1GB)(exit或q退出)：" swapgb
-    [[ $swapgb == "exit" || $swapgb == [Qq] ]] && Start_Menu && is_close=true && return
-    [[ -z ${swapgb} ]] && swapgb=1
-    do_swap ${swapgb}
-}
-
-Update_Shell() {
-    echo -e "当前版本为 [ ${sh_ver} ]，开始检测最新版本..."
-    sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'sh_ver="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
-    [[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && Start_Menu && is_close=true && return
-    if [[ ${sh_new_ver} != ${sh_ver} ]]; then
-        echo -e "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
-        read -p "(默认：y)：" yn
-        [[ -z "${yn}" ]] && yn="y"
-        if [[ ${yn} == [Yy] ]]; then
-            curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && chmod +x syssetup.sh
-            echo -e "脚本已更新为最新版本[ ${sh_new_ver} ]！"
-            echo -e "3s后执行新脚本"
-            sleep 3s
-            source syssetup.sh
-        else
-            echo && echo "	已取消..." && echo
-            sleep 3s
-            Start_Menu
-            is_close=true
+        if ! check_kms_new_version; then
+            _info "已取消 KMS Server 安装"
+            return 1
         fi
+
+        _info "开始安装 KMS Server"
+        if ! official_kms_download; then
+            _warn "已取消 KMS Server 安装"
+            return 1
+        fi
+
+        _info "开始配置 KMS Server 服务..."
+        config_kms_service
+
+        start_kms_server
+
     else
-        echo -e "当前已是最新版本[ ${sh_new_ver} ] ！"
+        _info "KMS Server 已安装"
+    fi
+}
+
+update_kms_server() {
+
+    if ! check_kms_server; then
+        _warn "未安装 KMS Server！"
+        return 1
+    fi
+
+    if ! check_kms_new_version; then
+        _info "已取消 KMS Server 更新"
+        return 1
+    fi
+
+    now_kms_ver=$(cat ${KMS_SERVER_CURRENT_VERSION})
+    if [[ "${kms_new_version}" == "${now_kms_ver}" ]]; then
+        _info "KMS Server 已是最新版本！"
+        return 1
+    fi
+
+    _info "发现 KMS Server 已有新版本 [ ${kms_new_version} ]，当前版本 [ ${now_kms_ver} ]"
+    read -rp "是否更新 ？ [Y/n]：" yn
+    yn=${yn:-y}
+    if [[ $yn == [Yy] ]]; then
+
+        # 检查 KMS Server 服务是否存在
+        if ! systemctl list-unit-files | grep -q "vlmcsd"; then
+            _warn "KMS Server 服务不存在！"
+            config_kms_service
+        fi
+
+        # 检查 KMS Server 进程状态
+        if systemctl is-active vlmcsd &>/dev/null; then
+            systemctl stop vlmcsd
+        fi
+
+        if ! official_kms_download; then
+            _warn "已取消 KMS Server 安装"
+            return 1
+        fi
+
         sleep 3s
-        Start_Menu
-        is_close=true
+        restart_kms_server
+        _info "KMS Server 更新完成！"
+
+    else
+        _info "已取消 KMS Server 更新"
+    fi
+
+}
+
+uninstall_kms_server() {
+
+    if ! check_kms_server; then
+        _warn "未安装 KMS Server！"
+        return 1
+    fi
+
+    read -rp "是否卸载 KMS Server ？ [Y/n] :" yn
+    yn=${yn:-y}
+    if [[ $yn == [Yy] ]]; then
+
+        _info "开始卸载 KMS Server ..."
+
+        if systemctl is-enabled vlmcsd &>/dev/null; then
+            systemctl disable vlmcsd
+        fi
+
+        # 检查 KMS Server 进程状态
+        if systemctl is-active vlmcsd &>/dev/null; then
+            systemctl stop vlmcsd
+        fi
+
+        rm -f "${KMS_SERVER_FILE}"
+        rm -f "${VLMCSD_SERVICE_FILE}"
+        rm -f "${KMS_SERVER_PID}"
+        rm -f "${KMS_SERVER_CURRENT_VERSION}"
+        _info "KMS Server 卸载完成！"
+
+    else
+        _info "已取消 KMS Server 卸载"
+    fi
+
+}
+
+view_kms_server_config() {
+
+    _info "KMS Server service:${VLMCSD_SERVICE_FILE}"
+    if [ -f "${VLMCSD_SERVICE_FILE}" ]; then
+        cat ${VLMCSD_SERVICE_FILE}
+    fi
+
+}
+
+view_kms_server_status() {
+
+    # 检查 KMS Server 服务是否存在
+    if systemctl list-unit-files | grep -q "vlmcsd"; then
+        systemctl status vlmcsd
+    else
+        _warn "KMS Server 服务不存在！"
+    fi
+
+}
+
+config_kms_server() {
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "配置管理 KMS Server"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 安装 KMS Server"
+        echoEnhance silver "2. 更新 KMS Server"
+        echoEnhance silver "3. 卸载 KMS Server"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "4. 查看 KMS Server 配置"
+        echoEnhance silver "5. 查看 KMS Server 状态"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "6. 启动 KMS Server"
+        echoEnhance silver "7. 停止 KMS Server"
+        echoEnhance silver "8. 重启 KMS Server"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            install_kms_server
+            ;;
+        2)
+            update_kms_server
+            ;;
+        3)
+            uninstall_kms_server
+            ;;
+        4)
+            view_kms_server_config
+            ;;
+        5)
+            view_kms_server_status
+            ;;
+        6)
+            start_kms_server
+            ;;
+        7)
+            stop_kms_server
+            ;;
+        8)
+            restart_kms_server
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+
+    done
+
+}
+
+function _print_list() {
+    local p_list=("$@")
+    for ((i = 1; i <= ${#p_list[@]}; i++)); do
+        hint="${p_list[$i - 1]}"
+        echo -e "${GREEN}${i}${NC}) ${hint}"
+    done
+}
+
+function _is_digit() {
+    local input=${1}
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        return 0
+    else
+        return 1
     fi
 }
 
-Start_Menu() {
-    clear
-    cr=check_root
-    check_sys
-    sysArch
+function _is_tlsv1_3_h2() {
 
-    if [[ ! $cr -eq 4 ]]; then
-        while true; do
-            [[ true = $is_close ]] && break
-            echo -e "
-=========================================
-${Red_font_prefix}System Set Up 管理脚本 [v${sh_ver}]${Font_color_suffix}
-=========================================
-${Yellow_font_prefix} 1. 更新本脚本 ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 2. 添加 swap 交换分区 ${Font_color_suffix}
-${Red_font_prefix} 3. 设置 repo 源 ${Font_color_suffix}
-${Green_font_prefix} 4. 更新系统，安装常用工具 ${Font_color_suffix}
-${Red_font_prefix} 5. 设置 SELinux ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 6. 设置 SSH 端口 ${Font_color_suffix}
-${Red_font_prefix} 7. 设置 firewalld 防火墙 ${Font_color_suffix}
-${Green_font_prefix} 8. 安装设置 NTP chrony ${Font_color_suffix}
-${Green_font_prefix} 9. 编译安装 Python ${Font_color_suffix}
-${Red_font_prefix} 10. 安装设置 Fail2Ban ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 11. 安装设置 Shadowsocks Rust ${Font_color_suffix}
-${Green_font_prefix} 12. 安装设置 ss-client & privoxy ${Font_color_suffix}
-———————————————————————————————————
-${Green_font_prefix} 13. 安装设置 KMS Server ${Font_color_suffix}
-———————————————————————————————————
-${Yellow_font_prefix} 0. 退出${Font_color_suffix}
-========================================="
-            read -e -p "(请输入序号)：" num
-            case "${num}" in
-            1)
-                Update_Shell
-                ;;
-            2)
-                add_swapfile
-                ;;
-            3)
-                set_repo
-                ;;
-            4)
-                yum update -y
-                yum install -y epel-release
-                yum install -y wget git gcc automake autoconf libtool make net-tools jq
-                ;;
-            5)
-                set_selinux
-                ;;
-            6)
-                set_ssh_port
-                ;;
-            7)
-                set_firewall
-                ;;
-            8)
-                set_ntp_chrony
-                ;;
-            9)
-                install_python
-                ;;
-            10)
-                install_fail2ban
-                ;;
-            11)
-                setup_ssrust
-                ;;
-            12)
-                setup_ssclient
-                ;;
-            13)
-                setup_kmsserver
-                ;;
-            0)
-                break
-                ;;
-            *)
-                echo -e "${Error}输入错误数字:${num}，请重新输入 ！" && echo
-                ;;
-            esac
+    local check_url
+    check_url=$(echo "$1" | grep -oE '[^/]+(\.[^/]+)+\b' | head -n 1)
+
+    local check_num
+    check_num=$(echo QUIT | stdbuf -oL openssl s_client -connect "${check_url}:443" -tls1_3 -alpn h2 2>&1 | grep -Eoi '(TLSv1.3)|(^ALPN\s+protocol:\s+h2$)|(X25519)' | sort -u | wc -l)
+    if [[ ${check_num} -eq 3 ]]; then
+        return 0
+    else
+        return 1
+    fi
+
+}
+
+function _version_ge() {
+    test "$(echo "$@" | tr ' ' '\n' | sort -rV | head -n 1)" == "$1"
+}
+
+function select_data() {
+    local data_list
+    # data_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}"))
+    mapfile -t data_list < <(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}")
+
+    local index_list
+    # index_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}"))
+    mapfile -t index_list < <(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}")
+
+    local result_list=()
+    if [[ ${#index_list[@]} -ne 0 ]]; then
+        for i in "${index_list[@]}"; do
+            if _is_digit "${i}" && [ "${i}" -ge 1 ] && [ "${i}" -le ${#data_list[@]} ]; then
+                i=$((i - 1))
+                result_list+=("${data_list[${i}]}")
+            fi
         done
+    else
+        result_list=("${data_list[@]}")
+    fi
+    if [[ ${#result_list[@]} -eq 0 ]]; then
+        result_list=("${data_list[@]}")
+    fi
+    echo "${result_list[@]}"
+}
+
+function read_port() {
+    local prompt="${1}"
+    local cur_port="${2}"
+    until [[ ${is_port} =~ ^[Yy]$ ]]; do
+        echo "${prompt}"
+        read -rp "请输入自定义的端口(1-65535), 默认不修改: " new_port
+        if [[ "${new_port}" == "" || ${new_port} -eq ${cur_port} ]]; then
+            new_port=${cur_port}
+            _info "不修改，继续使用原端口: ${cur_port}"
+            break
+        fi
+        if ! _is_digit "${new_port}" || [[ ${new_port} -lt 1 || ${new_port} -gt 65535 ]]; then
+            prompt="输入错误, 端口范围是 1-65535 之间的数字"
+            continue
+        fi
+        read -rp "请确认端口: \"${new_port}\" [Y/n] " is_port
+        is_port=${is_port:-y}
+        prompt="${1}"
+    done
+}
+
+function read_uuid() {
+    _info '自定义输入的 uuid ，如果不是标准格式，将会使用 xray uuid -i "自定义字符串" 进行 UUIDv5 映射后填入配置'
+    read -rp "请输入自定义 UUID, 默认则自动生成: " in_uuid
+}
+
+function read_domain() {
+    until [[ ${is_domain} =~ ^[Yy]$ ]]; do
+        read -rp "请输入域名：" domain
+        check_domain=$(echo "${domain}" | grep -oE '[^/]+(\.[^/]+)+\b' | head -n 1)
+        read -rp "请确认域名: \"${check_domain}\" [Y/n] " is_domain
+        is_domain=${is_domain:-y}
+    done
+    domain_path=$(echo "${domain}" | sed -En "s|.*${check_domain}(/.*)?|\1|p")
+    domain=${check_domain}
+}
+
+function select_dest() {
+
+    local dest_list
+    # dest_list=($(jq '.xray.serverNames | keys_unsorted' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p'))
+    mapfile -t dest_list < <(jq '.xray.serverNames | keys_unsorted' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')
+
+    local cur_dest
+    cur_dest=$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json)
+
+    local pick_dest=""
+    local all_sns=""
+    local sns=""
+
+    local prompt="请选择你的 dest, 当前默认使用 \"${cur_dest}\", 自填选 0: "
+    until [[ ${is_dest} =~ ^[Yy]$ ]]; do
+
+        echo -e "---------------- dest 列表 -----------------"
+        _print_list "${dest_list[@]}"
+
+        read -rp "${prompt}" pick
+        if [[ "${pick}" == "" && "${cur_dest}" != "" ]]; then
+            pick_dest=${cur_dest}
+            break
+        fi
+
+        if ! _is_digit "${pick}" || [[ "${pick}" -lt 0 || "${pick}" -gt ${#dest_list[@]} ]]; then
+            prompt="输入错误, 请输入 0-${#dest_list[@]} 之间的数字: "
+            continue
+        fi
+
+        if [[ "${pick}" == "0" ]]; then
+
+            _warn "如果输入列表中已有域名将会导致 serverNames 被修改"
+            _warn "使用自填域名时，请确保该域名在国内的连通性"
+            read_domain
+
+            _info "正在检查 \"${domain}\" 是否支持 TLSv1.3 与 h2"
+            if ! _is_tlsv1_3_h2 "${domain}"; then
+                _warn "\"${domain}\" 不支持 TLSv1.3 或 h2 ，亦或者 Client Hello 不是 X25519"
+                continue
+            fi
+            _info "\"${domain}\" 支持 TLSv1.3 与 h2"
+
+            _info "正在获取 Allowed domains"
+            pick_dest=${domain}
+            all_sns=$(xray tls ping "${pick_dest}" | sed -n '/with SNI/,$p' | sed -En 's/\[(.*)\]/\1/p' | sed -En 's/Allowed domains:\s*//p' | jq -R -c 'split(" ")' | jq --arg sni "${pick_dest}" '. += [$sni]')
+            sns=$(echo "${all_sns}" | jq 'map(select(test("^[^*]+$"; "g")))' | jq -c 'map(select(test("^((?!cloudflare|akamaized|edgekey|edgesuite|cloudfront|azureedge|msecnd|edgecastcdn|fastly|googleusercontent|kxcdn|maxcdn|stackpathdns|stackpathcdn).)*$"; "ig")))')
+
+            _info "过滤通配符前的 SNI"
+            _print_list "$(echo "${all_sns}" | jq -r '.[]')"
+
+            _info "过滤通配符后的 SNI"
+            _print_list "$(echo "${sns}" | jq -r '.[]')"
+
+            read -rp "请选择要使用的 serverName ，用英文逗号分隔， 默认全选: " pick_num
+            sns=$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"$(echo "${sns}" | jq -r -c '.[]')")" "${pick_num}" | jq -R -c 'split(" ")')
+
+            _info "如果有更多的 serverNames 请在 ${XRAY_COINFIG_PATH}config.json 中自行编辑"
+        else
+            pick_dest="${dest_list[${pick} - 1]}"
+        fi
+
+        read -rp "是否使用 dest: \"${pick_dest}\" [Y/n] " is_dest
+        is_dest=${is_dest:-y}
+        prompt="请选择你的 dest, 当前默认使用 \"${cur_dest}\", 自填选 0: "
+        echo -e "-------------------------------------------"
+
+    done
+
+    _info "正在修改配置"
+    [[ "${domain_path}" != "" ]] && pick_dest="${pick_dest}${domain_path}"
+    if echo "${pick_dest}" | grep -q '/$'; then
+        pick_dest=$(echo "${pick_dest}" | sed -En 's|/+$||p')
+    fi
+    [[ "${sns}" != "" ]] && jq --argjson sn "{\"${pick_dest}\": ${sns}}" '.xray.serverNames += $sn' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+    jq --arg dest "${pick_dest}" '.xray.dest = $dest' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+
+}
+
+install_dependencies() {
+
+    _info "正在下载相关依赖 ..."
+
+    ${installPackage} ca-certificates openssl curl wget jq tzdata
+
+    case "${osInfo[ID]}" in
+    centos)
+        ${installPackage} crontabs util-linux iproute procps-ng
+        ;;
+    debian | ubuntu)
+        ${installPackage} cron bsdmainutils iproute2 procps
+        ;;
+    esac
+
+}
+
+install_update_xray() {
+
+    _info "正在安装或更新 Xray ..."
+
+    # 官方安装脚本安装 Xray
+    # _error_detect "bash -c \"$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)\" @ install -u root"
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root
+
+    # 更新 Xray 版本号
+    jq --arg ver "$(xray version | head -n 1 | cut -d \( -f 1 | grep -Eoi '[0-9.]*')" '.xray.version = $ver' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+
+    # 更新 geoip geosite
+    wget -O ${XRAY_COINFIG_PATH}update-dat.sh https://raw.githubusercontent.com/faintx/public/main/tools/update-dat.sh
+    chmod a+x ${XRAY_COINFIG_PATH}update-dat.sh
+
+    # 更新定时任务
+    (
+        crontab -l 2>/dev/null
+        echo "30 05 * * * ${XRAY_COINFIG_PATH}update-dat.sh >/dev/null 2>&1"
+    ) | awk '!x[$0]++' | crontab -
+
+    _info "获取 geoip geosite 数据 ..."
+    ${XRAY_COINFIG_PATH}update-dat.sh
+
+}
+
+function config_xray() {
+
+    _info "正在配置 xray config.json"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" --download
+
+    local xray_x25519
+    xray_x25519=$(xray x25519)
+
+    local xs_private_key
+    xs_private_key=$(echo "${xray_x25519}" | awk '{print $3}')
+
+    local xs_public_key
+    xs_public_key=$(echo "${xray_x25519}" | awk '{print $6}')
+
+    # Xray-script config.json
+    jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+    jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+
+    # Xray-core config.json
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -p "${new_port}"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -u "${in_uuid}"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -d "$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' ${XRAY_COINFIG_PATH}config.json | tr '\n' ',')"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -x "${xs_private_key}"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -rsid
+
+    mv -f "${HOME}/config.json" ${XRAY_SERVER_PATH}config.json
+
+    _systemctl "restart" "xray"
+
+}
+
+function show_share_link() {
+
+    local sl=""
+    # share lnk contents
+    local sl_host
+    sl_host=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
+    local sl_inbound
+    sl_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' ${XRAY_SERVER_PATH}config.json)
+    local sl_port
+    sl_port=$(echo "${sl_inbound}" | jq -r '.port')
+    local sl_protocol
+    sl_protocol=$(echo "${sl_inbound}" | jq -r '.protocol')
+    local sl_ids
+    sl_ids=$(echo "${sl_inbound}" | jq -r '.settings.clients[] | .id')
+    local sl_public_key
+    sl_public_key=$(jq -r '.xray.publicKey' ${XRAY_COINFIG_PATH}config.json)
+    local sl_serverNames
+    sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
+    local sl_shortIds
+    sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
+
+    # share link fields
+    local sl_uuid=""
+    local sl_security='security=reality'
+    local sl_flow='flow=xtls-rprx-vision'
+    local sl_fingerprint='fp=chrome'
+    local sl_publicKey="pbk=${sl_public_key}"
+    local sl_sni=""
+    local sl_shortId=""
+    local sl_spiderX='spx=%2F'
+    local sl_descriptive_text='VLESS-XTLS-uTLS-REALITY'
+    # select show
+    _print_list "${sl_ids[@]}"
+
+    read -rp "请选择生成分享链接的 UUID ，用英文逗号分隔， 默认全选: " pick_num
+    # sl_id=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}"))
+    mapfile -t sl_id < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")
+    _print_list "${sl_serverNames[@]}"
+
+    read -rp "请选择生成分享链接的 serverName ，用英文逗号分隔， 默认全选: " pick_num
+    # sl_serverNames=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}"))
+    mapfile -t sl_serverNames < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")
+    _print_list "${sl_shortIds[@]}"
+
+    read -rp "请选择生成分享链接的 shortId ，用英文逗号分隔， 默认全选: " pick_num
+    # sl_shortIds=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}"))
+    mapfile -t sl_shortIds < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}")
+
+    echo -e "--------------- share link ---------------"
+    for sl_id in "${sl_ids[@]}"; do
+        sl_uuid="${sl_id}"
+        for sl_serverName in "${sl_serverNames[@]}"; do
+            sl_sni="sni=${sl_serverName}"
+            echo -e "---------- serverName ${sl_sni} ----------"
+            for sl_shortId in "${sl_shortIds[@]}"; do
+                [[ "${sl_shortId//\"/}" != "" ]] && sl_shortId="sid=${sl_shortId//\"/}" || sl_shortId=""
+                sl="${sl_protocol}://${sl_uuid}@${sl_host}:${sl_port}?${sl_security}&${sl_flow}&${sl_fingerprint}&${sl_publicKey}&${sl_sni}&${sl_spiderX}&${sl_shortId}"
+                echo "${sl%&}#${sl_descriptive_text}"
+            done
+            echo -e "------------------------------------------------"
+        done
+    done
+    echo -e "------------------------------------------"
+    echo -e "${RED}此脚本仅供交流学习使用，请勿使用此脚本行违法之事。${NC}"
+    echo -e "${RED}网络非法外之地，行非法之事，必将接受法律制裁。${NC}"
+    echo -e "------------------------------------------"
+}
+
+function show_xray_config() {
+
+    local IPv4
+    IPv4=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
+
+    local xs_inbound
+    xs_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' ${XRAY_SERVER_PATH}config.json)
+
+    local xs_port
+    xs_port=$(echo "${xs_inbound}" | jq '.port')
+
+    local xs_protocol
+    xs_protocol=$(echo "${xs_inbound}" | jq '.protocol')
+
+    local xs_ids
+    xs_ids=$(echo "${xs_inbound}" | jq '.settings.clients[] | .id' | tr '\n' ',')
+
+    local xs_public_key
+    xs_public_key=$(jq '.xray.publicKey' ${XRAY_COINFIG_PATH}config.json)
+
+    local xs_serverNames
+    xs_serverNames=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.serverNames[]' | tr '\n' ',')
+
+    local xs_shortIds
+    xs_shortIds=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.shortIds[]' | tr '\n' ',')
+
+    local xs_spiderX
+    xs_spiderX=$(jq '.xray.dest' ${XRAY_COINFIG_PATH}config.json)
+
+    [[ "${xs_spiderX}" == "${xs_spiderX##*/}" ]] && xs_spiderX='"/"' || xs_spiderX="\"/${xs_spiderX#*/}"
+    echo -e "-------------- client config --------------"
+    echo -e "address     : \"${IPv4}\""
+    echo -e "port        : ${xs_port}"
+    echo -e "protocol    : ${xs_protocol}"
+    echo -e "id          : ${xs_ids%,}"
+    echo -e "flow        : \"xtls-rprx-vision\""
+    echo -e "network     : \"raw\""
+    echo -e "TLS         : \"reality\""
+    echo -e "SNI         : ${xs_serverNames%,}"
+    echo -e "Fingerprint : \"chrome\""
+    echo -e "PublicKey   : ${xs_public_key}"
+    echo -e "ShortId     : ${xs_shortIds%,}"
+    echo -e "SpiderX     : ${xs_spiderX}"
+    echo -e "------------------------------------------"
+    read -rp "是否生成分享链接[y/n]: " is_show_share_link
+    echo
+    if [[ ${is_show_share_link} =~ ^[Yy]$ ]]; then
+        show_share_link
+    else
+        echo -e "------------------------------------------"
+        echo -e "${RED}此脚本仅供交流学习使用，请勿使用此脚本行违法之事。${NC}"
+        echo -e "${RED}网络非法外之地，行非法之事，必将接受法律制裁。${NC}"
+        echo -e "------------------------------------------"
     fi
 }
-Start_Menu
+
+install_xray_server() {
+
+    if command -v xray &>/dev/null; then
+        _info "Xray-REALITY Server 已安装！"
+        return 1
+    fi
+
+    if [[ ! -d "${XRAY_COINFIG_PATH}" ]]; then
+        mkdir -p "${XRAY_COINFIG_PATH}"
+
+        wget -O "${XRAY_COINFIG_PATH}config.json" https://raw.githubusercontent.com/faintx/public/main/configs/config.json
+        wget -O ${XRAY_CONFIG_MANAGER} https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
+        chmod a+x ${XRAY_CONFIG_MANAGER}
+
+        install_dependencies
+        install_update_xray
+
+        # 设置 Xray 端口
+        local xs_port
+        xs_port=$(jq '.xray.port' ${XRAY_COINFIG_PATH}config.json)
+        read_port "xray config 配置默认使用: ${xs_port}" "${xs_port}"
+
+        # 设置 Xray UUID
+        read_uuid
+
+        # 设置 Xray REALITY target & serverNames
+        select_dest
+
+        # 设置 Xray 配置文件
+        config_xray
+
+        # 显示配置信息 & 生成分享链接
+        show_xray_config
+
+        _info "Xray-REALITY Server 安装成功！"
+    else
+        _info "Xray-REALITY Server 已安装！"
+    fi
+}
+
+update_xray_server() {
+
+    _info "判断 Xray 是否用新版本"
+
+    local current_xray_version
+    current_xray_version="$(jq -r '.xray.version' ${XRAY_COINFIG_PATH}config.json)"
+
+    local latest_xray_version
+    latest_xray_version="$(wget -qO- --no-check-certificate https://api.github.com/repos/XTLS/Xray-core/releases | jq -r '.[0].tag_name ' | cut -d v -f 2)"
+
+    if _version_ge "${latest_xray_version}" "${current_xray_version}"; then
+        _info "检测到有新版可用"
+        install_update_xray
+    else
+        _info "当前已是最新版本: ${current_xray_version}"
+    fi
+
+}
+
+function purge_xray() {
+
+    _info "正在卸载 Xray"
+
+    crontab -l | grep -v "/usr/local/etc/xray-script/update-dat.sh >/dev/null 2>&1" | crontab -
+
+    _systemctl "stop" "xray"
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
+
+    rm -rf /etc/systemd/system/xray.service
+    rm -rf /etc/systemd/system/xray@.service
+    rm -rf /usr/local/bin/xray
+    rm -rf /usr/local/etc/xray
+    rm -rf /usr/local/share/xray
+    rm -rf /var/log/xray
+
+}
+
+uninstall_xray_server() {
+
+    purge_xray
+
+    [[ -f ${XRAY_COINFIG_PATH}sysctl.conf.bak ]] && mv -f ${XRAY_COINFIG_PATH}sysctl.conf.bak /etc/sysctl.conf && _info "已还原网络连接设置"
+    rm -rf ${XRAY_COINFIG_PATH}
+
+    if docker ps | grep -q cloudflare-warp; then
+        _info '正在停止 cloudflare-warp'
+        docker container stop cloudflare-warp
+        docker container rm cloudflare-warp
+    fi
+
+    if docker images | grep -q e7h4n/cloudflare-warp; then
+        _info '正在卸载 cloudflare-warp'
+        docker image rm e7h4n/cloudflare-warp
+    fi
+
+    # rm -rf "${HOME}"/.warp
+    # _info 'Docker 请自行卸载'
+
+    _info "Xray-REALITY Server 已经完成卸载."
+
+}
+
+edit_xray_config() {
+
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "Xray-REALITY Server 修改配置"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 修改 uuid"
+        echoEnhance silver "2. 修改 target"
+        echoEnhance silver "3. 修改 x25519 key"
+        echoEnhance silver "4. 修改 shortIds"
+        echoEnhance silver "5. 修改 xray 监听端口"
+        echoEnhance silver "6. 刷新已有的 shortIds"
+        echoEnhance silver "7. 追加自定义 shortIds"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        1)
+            read_uuid
+            _info "正在修改用户 id"
+            "${XRAY_CONFIG_MANAGER}" -u "${in_uuid}"
+            _info "已成功修改用户 id"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        2)
+            _info "正在修改 target 与 serverNames"
+            select_dest
+            "${XRAY_CONFIG_MANAGER}" -d "$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
+            "${XRAY_CONFIG_MANAGER}" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' ${XRAY_COINFIG_PATH}config.json | tr '\n' ',')"
+            _info "已成功修改 dest 与 serverNames"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        3)
+            _info "正在修改 x25519 key"
+
+            local xray_x25519
+            xray_x25519=$(xray x25519)
+            local xs_private_key
+            xs_private_key=$(echo "${xray_x25519}" | awk '{print $3}')
+            local xs_public_key
+            xs_public_key=$(echo "${xray_x25519}" | awk '{print $6}')
+
+            # Xray-script config.json
+            jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+            jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+
+            # Xray-core config.json
+            "${XRAY_CONFIG_MANAGER}" -x "${xs_private_key}"
+            _info "已成功修改 x25519 key"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        4)
+            _info "shortId 值定义: 接受一个十六进制数值 ，长度为 2 的倍数，长度上限为 16"
+            _info "shortId 列表默认为值为[\"\"]，若有此项，客户端 shortId 可为空"
+            read -rp "请输入自定义 shortIds 值，多个值以英文逗号进行分隔: " sid_str
+            _info "正在修改 shortIds"
+            "${XRAY_CONFIG_MANAGER}" -sid "${sid_str}"
+            _info "已成功修改 shortIds"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        5)
+            local xs_port
+            xs_port=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality") | .port' ${XRAY_COINFIG_PATH}config.json)
+            read_port "当前 xray 监听端口为: ${xs_port}" "${xs_port}"
+            if [[ "${new_port}" && ${new_port} -ne ${xs_port} ]]; then
+                "${XRAY_CONFIG_MANAGER}" -p "${new_port}"
+                _info "当前 xray 监听端口已修改为: ${new_port}"
+                _systemctl "restart" "xray"
+                show_config
+            fi
+            ;;
+        6)
+            _info "正在修改 shortIds"
+            "${XRAY_CONFIG_MANAGER}" -rsid
+            _info "已成功修改 shortIds"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        7)
+            until [ ${#sid_str} -gt 0 ] && [ ${#sid_str} -le 16 ] && [ $((${#sid_str} % 2)) -eq 0 ]; do
+                _info "shortId 值定义: 接受一个十六进制数值 ，长度为 2 的倍数，长度上限为 16"
+                read -rp "请输入自定义 shortIds 值，不能为空，多个值以英文逗号进行分隔: " sid_str
+            done
+            _info "正在添加自定义 shortIds"
+            "${XRAY_CONFIG_MANAGER}" -asid "${sid_str}"
+            _info "已成功添加自定义 shortIds"
+            _systemctl "restart" "xray"
+            show_config
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+    done
+
+}
+
+# 3. 配置管理 Xray-REALITY Server
+config_xray_server() {
+
+    while true; do
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "配置管理 Xray-REALITY Server"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 安装"
+        echoEnhance silver "2. 更新"
+        echoEnhance silver "3. 卸载"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "4. 启动"
+        echoEnhance silver "5. 停止"
+        echoEnhance silver "6. 重启"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "7. 修改配置"
+        echoEnhance silver "8. 查看配置信息"
+        echoEnhance silver "9. 信息统计"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 返回上级菜单"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+
+        if [ -d "${XRAY_COINFIG_PATH}" ]; then
+            wget -qO ${XRAY_CONFIG_MANAGER} https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
+            chmod a+x ${XRAY_CONFIG_MANAGER}
+        fi
+
+        case "${num}" in
+        1)
+            install_xray_server
+            ;;
+        2)
+            update_xray_server
+            ;;
+        3)
+            uninstall_xray_server
+            ;;
+        4)
+            _systemctl "start" "xray"
+            ;;
+        5)
+            _systemctl "stop" "xray"
+            ;;
+        6)
+            _systemctl "restart" "xray"
+            ;;
+        7)
+            edit_xray_config
+            ;;
+        8)
+            show_xray_config
+            ;;
+        9)
+            [[ -f ${XRAY_CONFIG_MANAGER}traffic.sh ]] || wget -O ${XRAY_CONFIG_MANAGER}traffic.sh https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
+            bash ${XRAY_CONFIG_MANAGER}traffic.sh
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+
+    done
+
+}
+
+start_menu() {
+    # clear
+
+    while true; do
+        [[ true = "${is_close}" ]] && break
+
+        echo
+        echoEnhance gray "========================================="
+        echoEnhance blue "System Set Up 管理脚本"
+        echoEnhance green "当前版本：${shell_version}"
+        echoEnhance green "系统信息：${osInfo[NAME]}" "${osInfo[VERSION]}"
+        echoEnhance gray "========================================="
+        echoEnhance silver "1. 操作系统配置"
+        echoEnhance silver "2. 配置管理 KMS Server"
+        echoEnhance silver "3. 配置管理 Xray-REALITY Server"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance silver "99. 更新此脚本"
+        echoEnhance gray "———————————————————————————————————"
+        echoEnhance cyan "0. 退出"
+        echoEnhance gray "========================================="
+
+        read -rp "请输入序号:" num
+        case "${num}" in
+        99)
+            update_shell
+            ;;
+        1)
+            system_config
+            ;;
+        2)
+            config_kms_server
+            ;;
+        3)
+            config_xray_server
+            ;;
+        0)
+            break
+            ;;
+        *)
+            _warn "输入错误数字:${num}，请重新输入 ！"
+            ;;
+        esac
+    done
+
+    # 获取所有键和值
+    # echo "OS Information Details:"
+    # for key in "${!osInfo[@]}"; do
+    #     echo "$key: ${osInfo[$key]}"
+    # done
+
+}
+start_menu

@@ -129,8 +129,10 @@ while [[ $# -ge 1 ]]; do
     -u | --uuid)
         shift
         isResetUUID=1
-        if printf "%s" "${1}" | grep -Evq "${op_regex}"; then
-            resetUUID="$1"
+        param=$1
+        [[ -z "$param" ]] && param="NOTNONE"
+        if printf "%s" "${param}" | grep -Evq "${op_regex}"; then
+            resetUUID="${param}"
             shift
         fi
         ;;

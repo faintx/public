@@ -4,6 +4,14 @@
 
 ## 使用
 
-```bash
-curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && chmod +x syssetup.sh && source syssetup.sh
-```
+* curl
+
+  ```bash
+  curl -L -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && source syssetup.sh
+  ```
+
+* wget
+
+  ```sh
+  wget --no-check-certificate -O syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && source syssetup.sh
+  ```

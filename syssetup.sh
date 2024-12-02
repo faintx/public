@@ -21,9 +21,17 @@ initEnvironment() {
     VLMCSD_SERVICE_FILE="/etc/systemd/system/vlmcsd.service"
 
     # config manager
-    readonly XRAY_SERVER_PATH="/usr/local/etc/xray/"
-    readonly XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
-    readonly XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
+    # readonly XRAY_SERVER_PATH="/usr/local/etc/xray/"
+    : "${XRAY_SERVER_PATH:="/usr/local/etc/xray/"}"
+    readonly XRAY_SERVER_PATH
+
+    # readonly XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
+    : "${XRAY_COINFIG_PATH:="/usr/local/etc/xray-script/"}"
+    readonly XRAY_COINFIG_PATH
+
+    # readonly XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
+    : "${XRAY_CONFIG_MANAGER:="${XRAY_COINFIG_PATH}xray_config_manager.sh"}"
+    readonly XRAY_CONFIG_MANAGER
 
     is_close=false
 }
@@ -103,7 +111,7 @@ function _error() {
     echoEnhance red "[错误] $*"
     #printf -- "%s" "$@"
     printf "\n"
-    exit 1
+    is_close=true
 }
 
 function _get_os_info() {
@@ -130,16 +138,16 @@ function _get_os_info() {
 
 function check_os() {
     _get_os_info
-    [[ -z "${osInfo[ID]}" ]] && _error "Not supported OS"
+    [[ -z "${osInfo[ID]}" ]] && _error "Not supported OS" && return
     case "${osInfo[ID]}" in
     ubuntu)
-        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 20 ] && _error "Not supported OS, please change to Ubuntu 20+ and try again."
+        [ -n "${osInfo[VERSION_ID]}" ] && [[ $(echo "${osInfo[VERSION_ID]}" | cut -d '.' -f 1) -lt 20 ]] && _error "Not supported OS, please change to Ubuntu 20+ and try again."
         ;;
     debian)
-        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 11 ] && _error "Not supported OS, please change to Debian 11+ and try again."
+        [ -n "${osInfo[VERSION_ID]}" ] && [[ $(echo "${osInfo[VERSION_ID]}" | cut -d '.' -f 1) -lt 11 ]] && _error "Not supported OS, please change to Debian 11+ and try again."
         ;;
     centos)
-        [ -n "${osInfo[VERSION_ID]}" ] && [ "${osInfo[VERSION_ID]}" -lt 7 ] && _error "Not supported OS, please change to CentOS 7+ and try again."
+        [ -n "${osInfo[VERSION_ID]}" ] && [[ $(echo "${osInfo[VERSION_ID]}" | cut -d '.' -f 1) -lt 7 ]] && _error "Not supported OS, please change to CentOS 7+ and try again."
         installPackage="yum install -y"
         # removePackage="yum remove -y"
         updatePackage="yum update -y"
@@ -669,6 +677,7 @@ set_centos_tsinghua_repo() {
 
 config_repo() {
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "设置 repo 源"
@@ -1112,6 +1121,7 @@ do_system_proxy() {
 config_system_proxy() {
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "config system proxy"
@@ -1226,6 +1236,7 @@ config_firewalld() {
     check_firewalld
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "设置 firewalld"
@@ -1505,6 +1516,7 @@ install_fail2ban() {
 
                 if ! popd; then
                     _error "切换回目录失败,请检查!"
+                    return
                 fi
 
                 _info "配置 Fail2Ban 启动服务:fail2ban.service" && echo
@@ -1684,6 +1696,7 @@ update_fail2ban() {
 config_fail2ban() {
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "设置 Fail2Ban"
@@ -1726,6 +1739,7 @@ config_fail2ban() {
 system_config() {
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "操作系统配置"
@@ -2057,6 +2071,7 @@ view_kms_server_status() {
 
 config_kms_server() {
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 KMS Server"
@@ -2152,11 +2167,11 @@ function _version_ge() {
 function select_data() {
     local data_list
     # data_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}"))
-    mapfile -t data_list < <(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}")
+    read -r -a data_list <<<"$(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}")"
 
     local index_list
     # index_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}"))
-    mapfile -t index_list < <(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}")
+    read -r -a index_list <<<"$(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}")"
 
     local result_list=()
     if [[ ${#index_list[@]} -ne 0 ]]; then
@@ -2216,10 +2231,10 @@ function select_dest() {
 
     local dest_list
     # dest_list=($(jq '.xray.serverNames | keys_unsorted' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p'))
-    mapfile -t dest_list < <(jq '.xray.serverNames | keys_unsorted' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')
+    mapfile -t dest_list <<<"$(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')"
 
     local cur_dest
-    cur_dest=$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json)
+    cur_dest=$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json")
 
     local pick_dest=""
     local all_sns=""
@@ -2286,8 +2301,8 @@ function select_dest() {
     if echo "${pick_dest}" | grep -q '/$'; then
         pick_dest=$(echo "${pick_dest}" | sed -En 's|/+$||p')
     fi
-    [[ "${sns}" != "" ]] && jq --argjson sn "{\"${pick_dest}\": ${sns}}" '.xray.serverNames += $sn' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
-    jq --arg dest "${pick_dest}" '.xray.dest = $dest' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+    [[ "${sns}" != "" ]] && jq --argjson sn "{\"${pick_dest}\": ${sns}}" '.xray.serverNames += $sn' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
+    jq --arg dest "${pick_dest}" '.xray.dest = $dest' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
 
 }
 
@@ -2317,11 +2332,11 @@ install_update_xray() {
     bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root
 
     # 更新 Xray 版本号
-    jq --arg ver "$(xray version | head -n 1 | cut -d \( -f 1 | grep -Eoi '[0-9.]*')" '.xray.version = $ver' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+    jq --arg ver "$(xray version | head -n 1 | cut -d \( -f 1 | grep -Eoi '[0-9.]*')" '.xray.version = $ver' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
 
     # 更新 geoip geosite
-    wget -O ${XRAY_COINFIG_PATH}update-dat.sh https://raw.githubusercontent.com/faintx/public/main/tools/update-dat.sh
-    chmod a+x ${XRAY_COINFIG_PATH}update-dat.sh
+    wget -O "${XRAY_COINFIG_PATH}update-dat.sh" https://raw.githubusercontent.com/faintx/public/main/tools/update-dat.sh
+    chmod a+x "${XRAY_COINFIG_PATH}update-dat.sh"
 
     # 更新定时任务
     (
@@ -2330,7 +2345,7 @@ install_update_xray() {
     ) | awk '!x[$0]++' | crontab -
 
     _info "获取 geoip geosite 数据 ..."
-    ${XRAY_COINFIG_PATH}update-dat.sh
+    "${XRAY_COINFIG_PATH}update-dat.sh"
 
 }
 
@@ -2343,24 +2358,24 @@ function config_xray() {
     xray_x25519=$(xray x25519)
 
     local xs_private_key
-    xs_private_key=$(echo "${xray_x25519}" | awk '{print $3}')
+    xs_private_key=$(echo "${xray_x25519}" | head -1 | awk '{print $3}')
 
     local xs_public_key
-    xs_public_key=$(echo "${xray_x25519}" | awk '{print $6}')
+    xs_public_key=$(echo "${xray_x25519}" | tail -n 1 | awk '{print $3}')
 
     # Xray-script config.json
-    jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
-    jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+    jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
+    jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
 
     # Xray-core config.json
     "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -p "${new_port}"
     "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -u "${in_uuid}"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -d "$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' ${XRAY_COINFIG_PATH}config.json | tr '\n' ',')"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -d "$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
+    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' "${XRAY_COINFIG_PATH}config.json" | tr '\n' ',')"
     "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -x "${xs_private_key}"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -rsid
+    # "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -rsid
 
-    mv -f "${HOME}/config.json" ${XRAY_SERVER_PATH}config.json
+    mv -f "${HOME}/config.json" "${XRAY_SERVER_PATH}config.json"
 
     _systemctl "restart" "xray"
 
@@ -2373,7 +2388,7 @@ function show_share_link() {
     local sl_host
     sl_host=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
     local sl_inbound
-    sl_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' ${XRAY_SERVER_PATH}config.json)
+    sl_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' "${XRAY_SERVER_PATH}config.json")
     local sl_port
     sl_port=$(echo "${sl_inbound}" | jq -r '.port')
     local sl_protocol
@@ -2381,11 +2396,24 @@ function show_share_link() {
     local sl_ids
     sl_ids=$(echo "${sl_inbound}" | jq -r '.settings.clients[] | .id')
     local sl_public_key
-    sl_public_key=$(jq -r '.xray.publicKey' ${XRAY_COINFIG_PATH}config.json)
+    sl_public_key=$(jq -r '.xray.publicKey' "${XRAY_COINFIG_PATH}config.json")
+
     local sl_serverNames
-    sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
+    # sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
+
+    # read 命令有一个限制：它只读取一行输入，并将其存储在一个变量中。如果你想读取多行输入并将其存储在一个数组中，你需要使用 while 循环或其他方法。
+    # 在这里，配置文件中有多行，它只返回第一行，因此无法使用 read 命令
+    # read -r -a sl_serverNames <<< "$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
+
+    # mapfile 可以读取多行，这里有多行都可以返回
+    mapfile -t sl_serverNames <<<"$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
+
+    # A synonym for `mapfile'.
+    # readarray -t sl_serverNames <<< "$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
+
     local sl_shortIds
-    sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
+    # sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
+    mapfile -t sl_shortIds <<<"$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')"
 
     # share link fields
     local sl_uuid=""
@@ -2397,22 +2425,24 @@ function show_share_link() {
     local sl_shortId=""
     local sl_spiderX='spx=%2F'
     local sl_descriptive_text='VLESS-XTLS-uTLS-REALITY'
+
     # select show
     _print_list "${sl_ids[@]}"
-
     read -rp "请选择生成分享链接的 UUID ，用英文逗号分隔， 默认全选: " pick_num
     # sl_id=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}"))
-    mapfile -t sl_id < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")
-    _print_list "${sl_serverNames[@]}"
+    # mapfile -t sl_id < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")
+    read -r -a sl_id <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")"
 
+    _print_list "${sl_serverNames[@]}"
     read -rp "请选择生成分享链接的 serverName ，用英文逗号分隔， 默认全选: " pick_num
     # sl_serverNames=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}"))
-    mapfile -t sl_serverNames < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")
-    _print_list "${sl_shortIds[@]}"
+    # mapfile -t sl_serverNames < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")
+    read -r -a sl_serverNames <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")"
 
+    _print_list "${sl_shortIds[@]}"
     read -rp "请选择生成分享链接的 shortId ，用英文逗号分隔， 默认全选: " pick_num
     # sl_shortIds=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}"))
-    mapfile -t sl_shortIds < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}")
+    read -r -a sl_shortIds <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}")"
 
     echo -e "--------------- share link ---------------"
     for sl_id in "${sl_ids[@]}"; do
@@ -2440,7 +2470,7 @@ function show_xray_config() {
     IPv4=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
 
     local xs_inbound
-    xs_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' ${XRAY_SERVER_PATH}config.json)
+    xs_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' "${XRAY_SERVER_PATH}config.json")
 
     local xs_port
     xs_port=$(echo "${xs_inbound}" | jq '.port')
@@ -2452,7 +2482,7 @@ function show_xray_config() {
     xs_ids=$(echo "${xs_inbound}" | jq '.settings.clients[] | .id' | tr '\n' ',')
 
     local xs_public_key
-    xs_public_key=$(jq '.xray.publicKey' ${XRAY_COINFIG_PATH}config.json)
+    xs_public_key=$(jq '.xray.publicKey' "${XRAY_COINFIG_PATH}config.json")
 
     local xs_serverNames
     xs_serverNames=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.serverNames[]' | tr '\n' ',')
@@ -2461,7 +2491,7 @@ function show_xray_config() {
     xs_shortIds=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.shortIds[]' | tr '\n' ',')
 
     local xs_spiderX
-    xs_spiderX=$(jq '.xray.dest' ${XRAY_COINFIG_PATH}config.json)
+    xs_spiderX=$(jq '.xray.dest' "${XRAY_COINFIG_PATH}config.json")
 
     [[ "${xs_spiderX}" == "${xs_spiderX##*/}" ]] && xs_spiderX='"/"' || xs_spiderX="\"/${xs_spiderX#*/}"
     echo -e "-------------- client config --------------"
@@ -2478,8 +2508,9 @@ function show_xray_config() {
     echo -e "ShortId     : ${xs_shortIds%,}"
     echo -e "SpiderX     : ${xs_spiderX}"
     echo -e "------------------------------------------"
-    read -rp "是否生成分享链接[y/n]: " is_show_share_link
+    read -rp "是否生成分享链接[Y/n]: " is_show_share_link
     echo
+    is_show_share_link=${is_show_share_link:-Y}
     if [[ ${is_show_share_link} =~ ^[Yy]$ ]]; then
         show_share_link
     else
@@ -2501,15 +2532,15 @@ install_xray_server() {
         mkdir -p "${XRAY_COINFIG_PATH}"
 
         wget -O "${XRAY_COINFIG_PATH}config.json" https://raw.githubusercontent.com/faintx/public/main/configs/config.json
-        wget -O ${XRAY_CONFIG_MANAGER} https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
-        chmod a+x ${XRAY_CONFIG_MANAGER}
+        wget -O "${XRAY_CONFIG_MANAGER}" https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
+        chmod a+x "${XRAY_CONFIG_MANAGER}"
 
         install_dependencies
         install_update_xray
 
         # 设置 Xray 端口
         local xs_port
-        xs_port=$(jq '.xray.port' ${XRAY_COINFIG_PATH}config.json)
+        xs_port=$(jq '.xray.port' "${XRAY_COINFIG_PATH}config.json")
         read_port "xray config 配置默认使用: ${xs_port}" "${xs_port}"
 
         # 设置 Xray UUID
@@ -2535,7 +2566,7 @@ update_xray_server() {
     _info "判断 Xray 是否用新版本"
 
     local current_xray_version
-    current_xray_version="$(jq -r '.xray.version' ${XRAY_COINFIG_PATH}config.json)"
+    current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
 
     local latest_xray_version
     latest_xray_version="$(wget -qO- --no-check-certificate https://api.github.com/repos/XTLS/Xray-core/releases | jq -r '.[0].tag_name ' | cut -d v -f 2)"
@@ -2571,8 +2602,8 @@ uninstall_xray_server() {
 
     purge_xray
 
-    [[ -f ${XRAY_COINFIG_PATH}sysctl.conf.bak ]] && mv -f ${XRAY_COINFIG_PATH}sysctl.conf.bak /etc/sysctl.conf && _info "已还原网络连接设置"
-    rm -rf ${XRAY_COINFIG_PATH}
+    [[ -f ${XRAY_COINFIG_PATH}sysctl.conf.bak ]] && mv -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" /etc/sysctl.conf && _info "已还原网络连接设置"
+    rm -rf "${XRAY_COINFIG_PATH}"
 
     if docker ps | grep -q cloudflare-warp; then
         _info '正在停止 cloudflare-warp'
@@ -2595,6 +2626,7 @@ uninstall_xray_server() {
 edit_xray_config() {
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "Xray-REALITY Server 修改配置"
@@ -2604,7 +2636,7 @@ edit_xray_config() {
         echoEnhance silver "3. 修改 x25519 key"
         echoEnhance silver "4. 修改 shortIds"
         echoEnhance silver "5. 修改 xray 监听端口"
-        echoEnhance silver "6. 刷新已有的 shortIds"
+        echoEnhance silver "6. 刷新已有的 shortIds (重新自动生成新的)"
         echoEnhance silver "7. 追加自定义 shortIds"
         echoEnhance gray "———————————————————————————————————"
         echoEnhance cyan "0. 返回上级菜单"
@@ -2623,8 +2655,8 @@ edit_xray_config() {
         2)
             _info "正在修改 target 与 serverNames"
             select_dest
-            "${XRAY_CONFIG_MANAGER}" -d "$(jq -r '.xray.dest' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
-            "${XRAY_CONFIG_MANAGER}" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' ${XRAY_COINFIG_PATH}config.json | tr '\n' ',')"
+            "${XRAY_CONFIG_MANAGER}" -d "$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
+            "${XRAY_CONFIG_MANAGER}" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' "${XRAY_COINFIG_PATH}config.json" | tr '\n' ',')"
             _info "已成功修改 dest 与 serverNames"
             _systemctl "restart" "xray"
             show_config
@@ -2634,14 +2666,16 @@ edit_xray_config() {
 
             local xray_x25519
             xray_x25519=$(xray x25519)
+
             local xs_private_key
-            xs_private_key=$(echo "${xray_x25519}" | awk '{print $3}')
+            xs_private_key=$(echo "${xray_x25519}" | head -1 | awk '{print $3}')
+
             local xs_public_key
-            xs_public_key=$(echo "${xray_x25519}" | awk '{print $6}')
+            xs_public_key=$(echo "${xray_x25519}" | tail -n 1 | awk '{print $3}')
 
             # Xray-script config.json
-            jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
-            jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' ${XRAY_COINFIG_PATH}config.json >${XRAY_COINFIG_PATH}new.json && mv -f ${XRAY_COINFIG_PATH}new.json ${XRAY_COINFIG_PATH}config.json
+            jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
+            jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
 
             # Xray-core config.json
             "${XRAY_CONFIG_MANAGER}" -x "${xs_private_key}"
@@ -2661,7 +2695,7 @@ edit_xray_config() {
             ;;
         5)
             local xs_port
-            xs_port=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality") | .port' ${XRAY_COINFIG_PATH}config.json)
+            xs_port=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality") | .port' "${XRAY_COINFIG_PATH}config.json")
             read_port "当前 xray 监听端口为: ${xs_port}" "${xs_port}"
             if [[ "${new_port}" && ${new_port} -ne ${xs_port} ]]; then
                 "${XRAY_CONFIG_MANAGER}" -p "${new_port}"
@@ -2703,6 +2737,7 @@ edit_xray_config() {
 config_xray_server() {
 
     while true; do
+        [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 Xray-REALITY Server"
@@ -2725,8 +2760,8 @@ config_xray_server() {
         read -rp "请输入序号:" num
 
         if [ -d "${XRAY_COINFIG_PATH}" ]; then
-            wget -qO ${XRAY_CONFIG_MANAGER} https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
-            chmod a+x ${XRAY_CONFIG_MANAGER}
+            wget -qO "${XRAY_CONFIG_MANAGER}" https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
+            chmod a+x "${XRAY_CONFIG_MANAGER}"
         fi
 
         case "${num}" in
@@ -2755,8 +2790,8 @@ config_xray_server() {
             show_xray_config
             ;;
         9)
-            [[ -f ${XRAY_CONFIG_MANAGER}traffic.sh ]] || wget -O ${XRAY_CONFIG_MANAGER}traffic.sh https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
-            bash ${XRAY_CONFIG_MANAGER}traffic.sh
+            [[ -f "${XRAY_CONFIG_MANAGER}traffic.sh" ]] || wget -O "${XRAY_CONFIG_MANAGER}traffic.sh" https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
+            bash "${XRAY_CONFIG_MANAGER}traffic.sh"
             ;;
         0)
             break

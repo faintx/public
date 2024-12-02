@@ -245,9 +245,10 @@ function is_valid_IPv4_address() {
     if [[ ! "${IPv4}" =~ ${ip_regex} ]]; then
         return 1
     fi
-    #   fields=($(awk -v FS='.' '{for (i = 1; i<=NF; i++) arr[i] = $i} END{for (i in arr) print arr[i]}' <<<"${IPv4}"))
+    # shellcheck disable=SC2207
+    fields=($(awk -v FS='.' '{for (i = 1; i<=NF; i++) arr[i] = $i} END{for (i in arr) print arr[i]}' <<<"${IPv4}"))
     # mapfile -t fields < <(awk -v FS='.' '{for (i = 1; i<=NF; i++) arr[i] = $i} END{for (i in arr) print arr[i]}' <<<"${IPv4}")
-    read -r -a fields <<< "$(awk -v FS='.' '{for (i = 1; i<=NF; i++) arr[i] = $i} END{for (i in arr) print arr[i]}' <<<"${IPv4}")"
+    # read -r -a fields <<< "$(awk -v FS='.' '{for (i = 1; i<=NF; i++) arr[i] = $i} END{for (i in arr) print arr[i]}' <<<"${IPv4}")"
     for field in "${fields[@]}"; do
         if ((field > 255)); then
             return 1

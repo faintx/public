@@ -2165,14 +2165,10 @@ function _version_ge() {
 }
 
 function select_data() {
-    local data_list
-    # data_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}"))
-    read -r -a data_list <<<"$(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}")"
-
-    local index_list
-    # index_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}"))
-    read -r -a index_list <<<"$(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}")"
-
+    # shellcheck disable=SC2207
+    local data_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}"))
+    # shellcheck disable=SC2207
+    local index_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}"))
     local result_list=()
     if [[ ${#index_list[@]} -ne 0 ]]; then
         for i in "${index_list[@]}"; do
@@ -2230,8 +2226,9 @@ function read_domain() {
 function select_dest() {
 
     local dest_list
-    # dest_list=($(jq '.xray.serverNames | keys_unsorted' ${XRAY_COINFIG_PATH}config.json | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p'))
-    mapfile -t dest_list <<<"$(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')"
+    # shellcheck disable=SC2207
+    dest_list=($(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p'))
+    # mapfile -t dest_list <<<"$(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')"
 
     local cur_dest
     cur_dest=$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json")
@@ -2399,21 +2396,10 @@ function show_share_link() {
     sl_public_key=$(jq -r '.xray.publicKey' "${XRAY_COINFIG_PATH}config.json")
 
     local sl_serverNames
-    # sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
-
-    # read 命令有一个限制：它只读取一行输入，并将其存储在一个变量中。如果你想读取多行输入并将其存储在一个数组中，你需要使用 while 循环或其他方法。
-    # 在这里，配置文件中有多行，它只返回第一行，因此无法使用 read 命令
-    # read -r -a sl_serverNames <<< "$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
-
-    # mapfile 可以读取多行，这里有多行都可以返回
-    mapfile -t sl_serverNames <<<"$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
-
-    # A synonym for `mapfile'.
-    # readarray -t sl_serverNames <<< "$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')"
+    sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
 
     local sl_shortIds
-    # sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
-    mapfile -t sl_shortIds <<<"$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')"
+    sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
 
     # share link fields
     local sl_uuid=""
@@ -2429,20 +2415,18 @@ function show_share_link() {
     # select show
     _print_list "${sl_ids[@]}"
     read -rp "请选择生成分享链接的 UUID ，用英文逗号分隔， 默认全选: " pick_num
-    # sl_id=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}"))
-    # mapfile -t sl_id < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")
-    read -r -a sl_id <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}")"
+    # shellcheck disable=SC2207
+    sl_id=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}"))
 
     _print_list "${sl_serverNames[@]}"
     read -rp "请选择生成分享链接的 serverName ，用英文逗号分隔， 默认全选: " pick_num
-    # sl_serverNames=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}"))
-    # mapfile -t sl_serverNames < <(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")
-    read -r -a sl_serverNames <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}")"
+    # shellcheck disable=SC2207
+    sl_serverNames=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}"))
 
     _print_list "${sl_shortIds[@]}"
     read -rp "请选择生成分享链接的 shortId ，用英文逗号分隔， 默认全选: " pick_num
-    # sl_shortIds=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}"))
-    read -r -a sl_shortIds <<<"$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}")"
+    # shellcheck disable=SC2207
+    sl_shortIds=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}"))
 
     echo -e "--------------- share link ---------------"
     for sl_id in "${sl_ids[@]}"; do

@@ -2555,7 +2555,8 @@ update_xray_server() {
     local latest_xray_version
     latest_xray_version="$(wget -qO- --no-check-certificate https://api.github.com/repos/XTLS/Xray-core/releases | jq -r '.[0].tag_name ' | cut -d v -f 2)"
 
-    if _version_ge "${latest_xray_version}" "${current_xray_version}"; then
+    # if _version_ge "${latest_xray_version}" "${current_xray_version}"; then
+    if [ "${latest_xray_version}" != "${current_xray_version}" ]; then
         _info "检测到有新版可用"
         install_update_xray
     else

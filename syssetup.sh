@@ -2781,7 +2781,7 @@ config_xray_server() {
             bash "${XRAY_CONFIG_MANAGER}traffic.sh"
             ;;
         11)
-            _systemctl "status" "xray"
+            systemctl status xray
             ;;
         0)
             break

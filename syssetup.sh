@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="1.3.0"
+shell_version="1.3.1"
 
 declare -A osInfo
 
@@ -1925,7 +1925,7 @@ After=syslog.target network.target
 
 [Service]
 Type=forking
-#PIDFile=${KMS_SERVER_PID}
+PIDFile=${KMS_SERVER_PID}
 ExecStart=${KMS_SERVER_FILE} -P${kms_port} -p ${KMS_SERVER_PID}
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -s QUIT \$MAINPID
@@ -2236,6 +2236,7 @@ function select_dest() {
     local pick_dest=""
     local all_sns=""
     local sns=""
+    local is_dest=""
 
     local prompt="请选择你的 dest, 当前默认使用 \"${cur_dest}\", 自填选 0: "
     until [[ ${is_dest} =~ ^[Yy]$ ]]; do
@@ -2635,7 +2636,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -u "${in_uuid}"
             _info "已成功修改用户 id"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         2)
             _info "正在修改 target 与 serverNames"
@@ -2644,7 +2645,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' "${XRAY_COINFIG_PATH}config.json" | tr '\n' ',')"
             _info "已成功修改 dest 与 serverNames"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         3)
             _info "正在修改 x25519 key"
@@ -2666,7 +2667,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -x "${xs_private_key}"
             _info "已成功修改 x25519 key"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         4)
             _info "shortId 值定义: 接受一个十六进制数值 ，长度为 2 的倍数，长度上限为 16"
@@ -2676,7 +2677,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -sid "${sid_str}"
             _info "已成功修改 shortIds"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         5)
             local xs_port
@@ -2686,7 +2687,7 @@ edit_xray_config() {
                 "${XRAY_CONFIG_MANAGER}" -p "${new_port}"
                 _info "当前 xray 监听端口已修改为: ${new_port}"
                 _systemctl "restart" "xray"
-                show_config
+                show_xray_config
             fi
             ;;
         6)
@@ -2694,7 +2695,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -rsid
             _info "已成功修改 shortIds"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         7)
             until [ ${#sid_str} -gt 0 ] && [ ${#sid_str} -le 16 ] && [ $((${#sid_str} % 2)) -eq 0 ]; do
@@ -2705,7 +2706,7 @@ edit_xray_config() {
             "${XRAY_CONFIG_MANAGER}" -asid "${sid_str}"
             _info "已成功添加自定义 shortIds"
             _systemctl "restart" "xray"
-            show_config
+            show_xray_config
             ;;
         0)
             break
@@ -2734,6 +2735,7 @@ config_xray_server() {
         echoEnhance silver "4. 启动"
         echoEnhance silver "5. 停止"
         echoEnhance silver "6. 重启"
+        echoEnhance silver "11. 查看服务状态"
         echoEnhance gray "———————————————————————————————————"
         echoEnhance silver "7. 修改配置"
         echoEnhance silver "8. 查看配置信息"
@@ -2777,6 +2779,9 @@ config_xray_server() {
         9)
             [[ -f "${XRAY_CONFIG_MANAGER}traffic.sh" ]] || wget -O "${XRAY_CONFIG_MANAGER}traffic.sh" https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
             bash "${XRAY_CONFIG_MANAGER}traffic.sh"
+            ;;
+        11)
+            _systemctl "status" "xray"
             ;;
         0)
             break

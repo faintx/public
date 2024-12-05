@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="1.3.1"
+shell_version="1.3.2"
 
 declare -A osInfo
 
@@ -13,6 +13,7 @@ initEnvironment() {
     updatePackage="apt update -y"
     upgradePackage="apt upgrade -y"
 
+    SSH_CONFIG="/etc/ssh/sshd_config"
     ETC_PROFILE="/etc/profile"
     FAIL2BAN_DIR="$(pwd)/fail2ban/"
     KMS_SERVER_FILE="/usr/bin/vlmcsd"
@@ -807,7 +808,6 @@ check_ssh_port_open() {
 config_ssh() {
 
     # SSH 配置文件路径
-    SSH_CONFIG="/etc/ssh/sshd_config"
     [[ ! -e ${SSH_CONFIG} ]] && _warn "${SSH_CONFIG} 配置文件不存在，请检查！" && return
 
     if [[ "${osInfo[ID]}" == "centos" ]]; then
@@ -839,16 +839,19 @@ config_ssh() {
         fi
     fi
 
+    local read_config_ssh_port
+    read_config_ssh_port=$(grep "^Port " "${SSH_CONFIG}" | awk '{print $2}')
     # 检查 Port
-    if grep -q "^Port " "${SSH_CONFIG}"; then
-        _info "当前端口设置为: $(grep "^Port " "${SSH_CONFIG}")"
+    if [ -n "$read_config_ssh_port" ]; then
+        _info "SSH 当前端口的设置为: ${read_config_ssh_port}"
     else
+        read_config_ssh_port=22
         _info "未找到 Port 设置，默认为 22 端口."
     fi
 
-    read -rp "请输入 SSH 端口号(默认为 22)(q退出):" SSH_PORT
+    read -rp "请输入 SSH 端口号(默认为:${read_config_ssh_port})(q退出):" SSH_PORT
     [[ ${SSH_PORT} == [Qq] ]] && return
-    SSH_PORT=${SSH_PORT:-22}
+    SSH_PORT=${SSH_PORT:-${read_config_ssh_port}}
     # expr "${SSH_PORT}" + 0 &>/dev/null
     if [[ ! "${SSH_PORT}" =~ ^[0-9]+$ || "$SSH_PORT" -le 0 || "$SSH_PORT" -gt 65535 ]]; then
         _warn "输入了错误的端口:${SSH_PORT}" && echo
@@ -859,7 +862,7 @@ config_ssh() {
         #echo -e "${Info}屏蔽原 SSH 端口成功 ！" && echo
 
         if grep -q "^Port " "${SSH_CONFIG}"; then
-            current_port=$(grep "^Port " "${SSH_CONFIG}" | awk '{print $2}')
+            current_port=${read_config_ssh_port}
             if [[ "${current_port}" != "${SSH_PORT}" ]]; then
                 _info "Port 当前设置为: ${current_port}，正在修改为 ${SSH_PORT}..."
                 check_ssh_port_open "${SSH_PORT}"
@@ -1178,6 +1181,18 @@ check_firewalld() {
         fi
     fi
 
+    if systemctl is-active --quiet firewalld; then
+        local read_config_ssh_port
+        read_config_ssh_port=$(grep "^Port " "${SSH_CONFIG}" | awk '{print $2}')
+
+        if ! firewall-cmd --zone=public --query-port="${read_config_ssh_port}"/tcp &>/dev/null; then
+            _info "默认自动打开 SSH 端口：${read_config_ssh_port}"
+            firewall-cmd --zone=public --add-port="${read_config_ssh_port}"/tcp --permanent
+            firewall-cmd --reload
+            _info "当前已打开端口：$(firewall-cmd --list-ports)."
+        fi
+    fi
+
 }
 
 open_firewalld_port() {
@@ -1240,6 +1255,13 @@ config_firewalld() {
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "设置 firewalld"
+
+        if systemctl is-active --quiet firewalld; then
+            if command -v firewall-cmd &>/dev/null; then
+                echoEnhance green "当前已打开端口：[ $(firewall-cmd --list-ports) ]"
+            fi
+        fi
+
         echoEnhance gray "========================================="
         echoEnhance silver "1. 打开防火墙端口"
         echoEnhance silver "2. 关闭防火墙端口"
@@ -1561,8 +1583,12 @@ install_fail2ban() {
     yn=${yn:-Y}
     if [[ ${yn} == [Yy] ]]; then
 
-        read -rp "请输入 SSH 端口号(q退出):" port
+        local read_config_ssh_port
+        read_config_ssh_port=$(grep "^Port " "${SSH_CONFIG}" | awk '{print $2}')
+
+        read -rp "请输入 SSH 端口号(SSH 端口号:${read_config_ssh_port})(q退出):" port
         [[ $port == "exit" || $port == [Qq] ]] && return
+        port=${port:-${read_config_ssh_port}}
         if [[ ! "${port}" =~ ^[0-9]+$ || "$port" -le 0 || "$port" -gt 65535 ]]; then
             _warn "输入了错误的端口:${port}" && echo
             return
@@ -1916,6 +1942,7 @@ config_kms_service() {
     if command -v firewall-cmd &>/dev/null; then
         firewall-cmd --zone=public --add-port="${kms_port}"/tcp --permanent
         firewall-cmd --reload
+        _info "防火墙端口:${kms_port} 打开成功！"
     fi
 
     echo "" >"${KMS_SERVER_PID}"
@@ -2075,6 +2102,14 @@ config_kms_server() {
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 KMS Server"
+
+        if [ -f "${KMS_SERVER_CURRENT_VERSION}" ]; then
+            now_kms_ver=$(cat ${KMS_SERVER_CURRENT_VERSION})
+            if [ -n "${now_kms_ver}" ]; then
+                echoEnhance green "当前 KMS Server 版本：${now_kms_ver}"
+            fi
+        fi
+
         echoEnhance gray "========================================="
         echoEnhance silver "1. 安装 KMS Server"
         echoEnhance silver "2. 更新 KMS Server"
@@ -2727,6 +2762,15 @@ config_xray_server() {
         echo
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 Xray-REALITY Server"
+
+        if [ -f "${XRAY_COINFIG_PATH}config.json" ]; then
+            local current_xray_version
+            current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
+            if [ -n "${current_xray_version}" ]; then
+                echoEnhance green "当前 Xray 版本：${current_xray_version}"
+            fi
+        fi
+
         echoEnhance gray "========================================="
         echoEnhance silver "1. 安装"
         echoEnhance silver "2. 更新"

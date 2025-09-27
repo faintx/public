@@ -4,6 +4,16 @@ shell_version="1.5.1"
 
 declare -A osInfo
 
+declare PROJECT_ROOT=''  # 项目安装根目录 (动态设置)
+declare SCRIPT_CONFIG='' # 存储脚本配置内容
+declare CORE_DIR=''      # 核心脚本目录 (动态设置)
+declare SERVICE_DIR=''   # 服务配置目录 (动态设置)
+declare CONFIG_DIR=''    # 配置文件目录 (动态设置)
+declare TOOL_DIR=''      # 工具脚本目录 (动态设置)
+
+# 声明一个关联数组，用于在脚本运行时临时存储用户输入的配置数据
+declare -A CONFIG_DATA # 用于临时存储用户输入的配置数据
+
 initEnvironment() {
     echoType="echo -e"
     printN=""
@@ -35,10 +45,12 @@ initEnvironment() {
     readonly XRAY_CONFIG_MANAGER
 
     # 定义配置文件和相关目录的路径
-    SCRIPT_CONFIG_DIR="${HOME}/.xray-script"              # 主配置文件目录
+    SCRIPT_CONFIG_DIR="${HOME}/.xray-script" # 主配置文件目录
     readonly SCRIPT_CONFIG_DIR
     SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json" # 脚本主配置文件路径
     readonly SCRIPT_CONFIG_PATH
+
+    XTLS_CONFIG="Vision"
 
     is_close=false
 }
@@ -277,19 +289,19 @@ function _error_detect() {
 
 update_shell() {
     _info "当前版本为 [ ${shell_version} ]，开始检测最新版本..."
-    sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/main/syssetup.sh | grep 'shell_version="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
+    sh_new_ver=$(curl https://raw.githubusercontent.com/faintx/public/refs/heads/main/sysset.sh | grep 'shell_version="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
     [[ -z "${sh_new_ver}" ]] && _warn "检测最新版本失败 !" && return
     if [[ ${sh_new_ver} != "${shell_version}" ]]; then
         echo "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
         read -rp "(默认:y):" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ ${yn} == [Yy] ]]; then
-            curl -o syssetup.sh https://raw.githubusercontent.com/faintx/public/main/syssetup.sh && chmod +x syssetup.sh
+            curl -o sysset.sh https://raw.githubusercontent.com/faintx/public/refs/heads/main/sysset.sh && chmod +x sysset.sh
             _info "脚本已更新为最新版本[ ${sh_new_ver} ]！"
             echo "3s后执行新脚本..."
             sleep 3s
             is_close=true
-            bash syssetup.sh
+            bash sysset.sh
         else
             _info "已取消..."
         fi
@@ -2606,7 +2618,7 @@ install_xray_dependencies() {
 install_xray_server() {
 
     if command -v xray &>/dev/null; then
-        _info "Xray-REALITY Server 已安装！"
+        _info "Xray Server 已安装！"
         return 1
     fi
 
@@ -2623,8 +2635,70 @@ install_xray_server() {
     # 检查脚本配置目录和配置文件是否存在，如果不存在则创建并下载默认配置
     if [[ ! -d "${SCRIPT_CONFIG_DIR}" && ! -f "${SCRIPT_CONFIG_PATH}" ]]; then
         mkdir -p "${SCRIPT_CONFIG_DIR}"
-        wget -O "${SCRIPT_CONFIG_PATH}" https://raw.githubusercontent.com/zxcvos/Xray-script/main/config.json
+        wget -O "${SCRIPT_CONFIG_PATH}" https://raw.githubusercontent.com/faintx/public/refs/heads/main/Xconfigs/config.json
     fi
+
+    # 从脚本配置文件中读取已记录的安装路径
+    local script_path
+    script_path="$(jq -r '.path' "${SCRIPT_CONFIG_PATH}")"
+    # 如果配置文件中没有记录路径，且命令行也未指定，则使用默认路径
+    if [[ -z "${script_path}" && -z "${PROJECT_ROOT}" ]]; then
+        PROJECT_ROOT='/usr/local/xray-script' # 设置默认项目根目录
+        # 将默认路径更新到脚本配置文件中
+        SCRIPT_CONFIG="$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
+        echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+
+    # 如果配置文件中已有记录的路径，则使用该路径
+    elif [[ -n "${script_path}" ]]; then
+        PROJECT_ROOT="${script_path}"
+
+    # # 如果配置文件中没有路径，但命令行指定了路径，则使用命令行指定的路径并更新配置文件
+    # elif [[ -n "${PROJECT_ROOT}" ]]; then
+    #     # 将命令行指定的路径更新到脚本配置文件中
+    #     SCRIPT_CONFIG="$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
+    #     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+
+    fi
+
+    CORE_DIR="${PROJECT_ROOT}/core"
+    SERVICE_DIR="${PROJECT_ROOT}/service"
+    CONFIG_DIR="${PROJECT_ROOT}/config"
+    TOOL_DIR="${PROJECT_ROOT}/tool"
+
+    # # 检查项目根目录是否存在
+    # if [[ -d "${PROJECT_ROOT}" ]]; then
+    #     # 如果存在，则检查版本更新
+    #     check_xray_script_version
+    # else
+    #     # 如果不存在，则下载项目文件
+    #     download_xray_script_files "${PROJECT_ROOT}"
+    # fi
+
+    echo
+    echoEnhance gray "========================================="
+    echoEnhance blue "选择 XTLS 配置类型"
+    echoEnhance gray "========================================="
+    echoEnhance silver "1. Vision (VLESS+Vision+REALITY) (默认)"
+    echoEnhance silver "2. XHTTP  (VLESS+XHTTP+REALITY)"
+    echoEnhance gray "———————————————————————————————————"
+    echoEnhance magenta "[INFO] 1. XTLS(Vision) 解决 TLS in TLS 问题"
+    echoEnhance magenta "[INFO] 2. XTLS(XHTTP) 全场景通吃的时代正式到来(详情: https://github.com/XTLS/Xray-core/discussions/4113"
+    echoEnhance magenta "[INFO]   2.1 XHTTP 默认有多路复用，延迟比 Vision 低但多线程测速不如它"
+    echoEnhance magenta "[INFO]   2.2 此外 v2rayN&G 客户端有全局 mux.cool 设置，用 XHTTP 前记得关闭，不然连不上新版 Xray 服务端"
+    echoEnhance gray "========================================="
+
+    read -rp "请输入序号:" num
+    case "${num}" in
+    1)
+        XTLS_CONFIG="Vision"
+        ;;
+    2)
+        XTLS_CONFIG="XHTTP"
+        ;;
+    *)
+        XTLS_CONFIG="Vision"
+        ;;
+    esac
 
 }
 

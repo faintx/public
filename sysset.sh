@@ -4,15 +4,13 @@ shell_version="1.5.1"
 
 declare -A osInfo
 
-declare PROJECT_ROOT=''  # 项目安装根目录 (动态设置)
-declare SCRIPT_CONFIG='' # 存储脚本配置内容
-declare CORE_DIR=''      # 核心脚本目录 (动态设置)
-declare SERVICE_DIR=''   # 服务配置目录 (动态设置)
-declare CONFIG_DIR=''    # 配置文件目录 (动态设置)
-declare TOOL_DIR=''      # 工具脚本目录 (动态设置)
+declare SCRIPT_CONFIG="" # 存储脚本配置内容
+declare XRAY_CONFIG=""   # 存储 Xray 配置 (通常在运行时加载)
 
 # 声明一个关联数组，用于在脚本运行时临时存储用户输入的配置数据
 declare -A CONFIG_DATA # 用于临时存储用户输入的配置数据
+
+declare -A CLIENT_CONFIG # 关联数组，存储当前处理的客户端配置片段
 
 initEnvironment() {
     echoType="echo -e"
@@ -49,6 +47,18 @@ initEnvironment() {
     readonly SCRIPT_CONFIG_DIR
     SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json" # 脚本主配置文件路径
     readonly SCRIPT_CONFIG_PATH
+
+    XRAY_CONFIG_PATH="/usr/local/etc/xray/config.json" # Xray 最终配置文件路径
+    readonly XRAY_CONFIG_PATH
+
+    # --- 正则表达式常量 ---
+    # 定义各种数据格式的正则表达式，用于验证输入
+    readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$" # 域名
+    #readonly IPV4_REGEX='^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$' # IPv4
+    #readonly IPV6_REGEX='^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'                                            # IPv6 (简化版)
+    readonly HEX_REGEX='^[0-9a-fA-F]+$'                                                                         # 十六进制字符串
+    readonly UUID_REGEX='^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$' # UUID
+    #readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'                                     # 邮箱地址
 
     XTLS_CONFIG="Vision"
 
@@ -131,6 +141,18 @@ function _error() {
     #printf -- "%s" "$@"
     printf "\n"
     is_close=true
+}
+
+function _pass() {
+    echoEnhance green "[通过] $*"
+    #printf -- "%s" "$@"
+    printf "\n"
+}
+
+function _fail() {
+    echoEnhance red "[失败] $*"
+    #printf -- "%s" "$@"
+    printf "\n"
 }
 
 function _get_os_info() {
@@ -2615,6 +2637,1502 @@ install_xray_dependencies() {
     esac
 }
 
+# =============================================================================
+# 函数名称: cmd_exists
+# 功能描述: 检查系统中是否存在指定的命令。
+# 参数:
+#   $1: 要检查的命令名称
+# 返回值: 无 (通过 return $rt 返回检查结果)
+# 退出码: 0 (命令存在), 非 0 (命令不存在)
+# =============================================================================
+function cmd_exists() {
+    local cmd="$1" # 获取要检查的命令名称
+    local rt=0     # 初始化返回码为 0 (表示存在)
+    # 尝试使用不同的方法检查命令是否存在
+    if eval type type >/dev/null 2>&1; then
+        # 使用 type 命令检查
+        eval type "$cmd" >/dev/null 2>&1
+    elif command >/dev/null 2>&1; then
+        # 使用 command -v 命令检查
+        command -v "$cmd" >/dev/null 2>&1
+    else
+        # 使用 which 命令检查
+        which "$cmd" >/dev/null 2>&1
+    fi
+    # 获取检查命令的退出码
+    rt=$?
+    # 返回检查结果
+    return ${rt}
+}
+
+# =============================================================================
+# 函数名称: check_xray_config_exists
+# 功能描述: 检查指定名称的 Xray 配置文件是否存在。
+# 参数:
+#   $1: 配置文件名（不含扩展名）(SCRIPT_FILE)
+# 返回值: 0-文件存在 1-文件不存在 (并打印相应的提示信息到 >&2)
+# =============================================================================
+function check_xray_config_exists() {
+    local SCRIPT_FILE="$1" # 获取配置文件名参数
+    CONFIG_XRAY_DIR="${SCRIPT_CONFIG_DIR}/config"
+    # 构造完整的配置文件路径
+    local CONFIG_FILE="${CONFIG_XRAY_DIR}/${SCRIPT_FILE}.json"
+
+    # 打印正在检查的信息
+    _info "正在检查 Xray 配置原文件是否存在:${CONFIG_FILE}"
+
+    # 检查文件是否存在
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        _info "Xray 配置原文件存在:${CONFIG_FILE}"
+        return 0
+    else
+        _warn "Xray 配置原文件不存在:${CONFIG_FILE}"
+        return 1
+    fi
+}
+
+# =============================================================================
+# 函数名称: valid_domain
+# 功能描述: 使用正则表达式检查给定字符串是否为有效的域名格式。
+# 参数:
+#   $1: 待检查的域名字符串 (domain)
+# 返回值: 0-有效 1-无效 (直接由 [[ =~ ]] 命令的退出码决定)
+# =============================================================================
+function valid_domain() {
+    local domain="$1" # 获取域名参数
+
+    # 使用正则表达式匹配域名格式，成功匹配返回 0，否则返回 1
+    [[ "${domain}" =~ ${DOMAIN_REGEX} ]] && return 0 || return 1
+}
+
+# =============================================================================
+# 函数名称: resolve_domain
+# 功能描述: 使用 dig 命令尝试解析域名，检查是否有有效的 IP 地址记录。
+# 参数:
+#   $1: 待解析的域名 (domain)
+# 返回值: 0-解析成功 1-解析失败或无记录
+# =============================================================================
+function resolve_domain() {
+    # 使用 dig +short 命令解析域名，并将输出通过管道传递给 grep
+    # 如果 grep 能在输出中找到至少一个 '.' 字符（通常是 IP 地址的一部分），则返回 0
+    # 否则返回 1
+    if dig +short "$1" | grep -q '.'; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# =============================================================================
+# 函数名称: test_tcp_connection
+# 功能描述: 测试到指定主机和端口的 TCP 连接是否可达。
+#           利用 bash 内建的 /dev/tcp 特性。
+# 参数:
+#   $1: 主机名或 IP 地址 (host)
+#   $2: 端口号 (port)
+# 返回值: 0-连接成功 1-连接失败 (由 /dev/tcp 操作的退出码决定)
+# =============================================================================
+function test_tcp_connection() {
+    # 尝试打开到 host:port 的 TCP 连接，将输出重定向到 /dev/null
+    # 成功则返回 0，失败（如连接被拒绝、超时）则返回非 0
+    echo >/dev/tcp/"$1"/"$2" 2>/dev/null
+    return #$? # 返回上一条命令的退出码
+}
+
+# =============================================================================
+# 函数名称: get_tls_info
+# 功能描述: 使用 openssl s_client 命令获取指定域名的 TLS 信息。
+# 参数:
+#   $1: 域名 (domain)
+# 返回值: TLS 连接的详细信息 (echo 输出)
+# 注意: 会过滤掉空字节 (\0)
+# =============================================================================
+function get_tls_info() {
+    # 向域名的 443 端口发起 TLS 1.3 连接请求，并指定 ALPN 为 h2
+    # 使用 echo QUIT 发送退出命令，stdbuf -oL 确保输出行缓冲
+    # 2>&1 将错误输出合并到标准输出，tr -d '\0' 过滤掉空字节
+    echo QUIT | stdbuf -oL openssl s_client -connect "${1}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+}
+
+# =============================================================================
+# 函数名称: domain_check
+# 功能描述: 全面检查域名的安全性，包括格式、解析、TCP 连接和 TLS 信息。
+# 参数:
+#   $1: 待检查的域名 (domain)
+# 返回值: 0-安全检查通过 1-安全检查失败 (并打印详细的检查过程和结果到 >&2)
+# =============================================================================
+domain_check() {
+    local domain="$1" # 获取域名参数
+
+    # 打印正在检查的信息
+    _info "正在检查域名安全性："
+
+    # 如果域名为空，则认为是有效的（可能表示不使用域名）
+    if [[ -z "${domain}" ]]; then
+        _pass "输入值为空，将随机在配置中选择一个目标域名"
+        return 0
+    fi
+
+    # 检查域名格式是否有效
+    if ! valid_domain "${domain}"; then
+        _fail "域名格式不合法：[${domain}]"
+        return 1
+    fi
+
+    # 测试域名解析
+    _info "正在解析域名：${domain}"
+    if ! resolve_domain "$domain"; then
+        _fail "域名解析失败：[${domain}]"
+        return 1
+    fi
+
+    # 测试到域名 443 端口的 TCP 连接
+    _info "正在测试 TCP 连接：${domain}:443"
+    if ! test_tcp_connection "$domain" 443; then
+        _fail "无法连接到：[${domain}:443]"
+        return 1
+    fi
+
+    # 获取域名的 TLS 信息
+    _info "正在获取 TLS 信息：${domain}"
+    local tls_info
+    tls_info=$(get_tls_info "$domain")
+
+    # 检查是否支持 TLS 1.3
+    if ! echo "$tls_info" | grep -q "TLSv1.3"; then
+        _fail "TLS 连接失败，可能不支持 TLS 1.3："
+        return 1
+    else
+        _pass "支持 TLS 1.3"
+    fi
+
+    # 检查是否使用 X25519 密钥交换算法
+    if echo "$tls_info" | grep -q "X25519"; then
+        _pass "使用 X25519 密钥交换算法"
+    else
+        _fail "未使用 X25519 密钥交换算法"
+        return 1
+    fi
+
+    # 如果所有检查都通过，则域名安全检查通过
+    _pass "域名 [${domain}] 安全性检查通过"
+    return 0
+}
+
+# =============================================================================
+# 函数名称: shortid_check
+# 功能描述: 验证 Short ID 是否符合要求（空、单数字、或有效的十六进制字符串）。
+# 参数:
+#   $1: 待检查的 Short ID (short_id)
+# 返回值: 0-有效 1-无效 (并打印相应的提示信息到 >&2)
+# =============================================================================
+function shortid_check() {
+    local short_id="$1" # 获取 Short ID 参数
+
+    # 打印正在检查的信息
+    _info "正在检查 shortId 合法性："
+
+    # 如果 Short ID 为空，则认为是有效的
+    if [[ -z "${short_id}" ]]; then
+        _pass "输入值为空，将随机生成 shortId"
+        return 0
+    fi
+
+    # 如果 Short ID 是 0-8 的单个数字，则认为是有效的（表示生成指定长度的 ID）
+    if [[ ${short_id} =~ ^[0-8]$ ]]; then
+        _pass "输入值为单个数字，将生成指定长度的 shortId"
+        return 0
+    fi
+
+    # 检查 Short ID 的长度是否为奇数或超过 16
+    if ((${#short_id} % 2 != 0 || ${#short_id} > 16)); then
+        _fail "输入值长度为奇数或超过 16，将随机生成 shortId"
+        return 1
+    fi
+
+    # 检查 Short ID 是否为有效的十六进制字符串
+    if ! [[ "${short_id}" =~ $HEX_REGEX ]]; then
+        _fail "输入值不是有效的十六进制字符串，将随机生成 shortId"
+        return 1
+    fi
+
+    # 如果所有检查都通过，则 Short ID 有效
+    _pass "输入值是有效的十六进制字符串，将使用该 shortId"
+    return 0
+}
+
+# =============================================================================
+# 函数名称: path_check
+# 功能描述: 验证路径字符串是否符合 URL 路径格式要求。
+# 参数:
+#   $1: 待检查的路径字符串 (path)
+# 返回值: 0-有效 1-无效 (并打印相应的提示信息到 >&2)
+# =============================================================================
+function path_check() {
+    local path="$1" # 获取路径参数
+
+    # 打印正在检查的信息
+    _info "正在检查 path 合法性：[${path}]"
+
+    # 如果路径为空，则认为是有效的（可能表示使用根路径）
+    if [[ -z "${path}" ]]; then
+        _pass "输入值为空，将使用根路径"
+        return 0
+    fi
+
+    # 检查路径中是否包含空格
+    if [[ "${path}" == *" "* ]]; then
+        _fail "路径不能包含空格：[${path}]"
+        return 1
+    fi
+
+    # 检查路径长度是否超过 128
+    if ((${#path} > 128)); then
+        _fail "路径长度超过 128：[${path}]"
+        return 1
+    fi
+
+    # 检查路径是否包含不允许的字符（只允许字母、数字、下划线、斜杠、点、连字符）
+    if [[ "${path}" =~ [^a-zA-Z0-9_/.\-] ]]; then
+        _fail "路径包含不允许的字符：[${path}]"
+        return 1
+    fi
+
+    # 检查路径是否包含连续的斜杠
+    if [[ "${path}" =~ // ]]; then
+        _fail "路径包含连续的斜杠：[${path}]"
+        return 1
+    fi
+
+    # 如果所有检查都通过，则路径有效
+    _pass "路径合法：[${path}]"
+    return 0
+}
+
+function read_input() {
+    local msg="$1"
+    local opt="$2" # 获取配置项名称
+    local read_result
+    local return_result
+    local flag=true # 初始化循环标志为 true
+
+    while ${flag}; do
+        read -rp "${msg}" read_result
+
+        case "${opt}" in
+        rules)
+            # 为规则选项设置默认值 'N'
+            return_result="${return_result:-N}"
+            ;;
+        block-bt | block-cn | block-ad)
+            # 归一化，空输入按 Y
+            ans="${read_result:-Y}"
+            case "${ans}" in
+            [Yy])
+                return_result="Y"
+                ;;
+            [Nn])
+                return_result="N"
+                ;;
+            *)
+                _warn "无效输入，请输入 [Y/n] 。"
+                continue
+                ;;
+            esac
+            ;;
+        port)
+            # 验证端口号
+            read_result=${read_result:-443}
+            if [[ ! "${read_result}" =~ ^[0-9]+$ || "${read_result}" -le 0 || "${read_result}" -gt 65535 ]]; then
+                _warn "输入了错误的端口:${read_result}" >&2 && echo
+                continue
+            else
+                return_result="${read_result}"
+            fi
+            ;;
+        uuid)
+            # 验证 UUID
+            # 打印正在检查的信息
+            _info "正在检查 UUID 类型：" >&2
+
+            # 如果 UUID 为空，则认为是有效的（可能表示使用默认值或自动生成）
+            if [[ -z "${read_result}" ]]; then
+                _pass "输入值为空，将自动生成一份 UUID" >&2
+            # 如果 UUID 不符合标准格式，则认为是有效的字符串（可能表示使用普通字符串）
+            elif ! [[ "${read_result}" =~ $UUID_REGEX ]]; then
+                _pass "输入值为普通字符串，将使用 Xray 映射生成 UUID：[${read_result}]" >&2
+            else
+                # 如果符合标准格式，则为有效 UUID
+                _pass "UUID 合法：[${read_result}]" >&2
+            fi
+            return_result="${read_result}"
+            ;;
+        target)
+            # 验证目标域名
+            domain_check "${read_result}" 1>&2 || continue
+            return_result="${read_result}"
+            ;;
+        short)
+            # 特殊处理 Short IDs
+            # 如果输入为空，进行验证 (可能是检查默认值)
+            [[ -z "${read_result}" ]] && shortid_check "${read_result}" 1>&2 && break
+            # 将逗号分隔的输入分割成数组
+            IFS=',' read -r -a values <<<"${read_result}"
+            # 遍历每个 Short ID 进行验证
+            for value in "${values[@]}"; do
+                if shortid_check "${value}" 1>&2; then
+                    # 验证通过则追加到 CONFIG_DATA['short_ids']
+                    CONFIG_DATA['short_ids']="${CONFIG_DATA['short_ids']} ${value}"
+                fi
+            done
+            ;;
+        path)
+            # 验证路径
+            path_check "${read_result}" 1>&2 || continue
+            return_result="${read_result}"
+            ;;
+        esac
+        # 输入验证通过，设置 flag 为 false 退出循环
+        flag=false
+    done
+
+    echo "${return_result}"
+
+}
+
+function exec_read() {
+    local opt="$1" # 获取配置项名称
+    local read_result
+
+    case "${opt}" in
+    rules)
+        CONFIG_DATA['rules']=$(read_input "是否重置路由规则 [y/N] :" "rules")
+        ;;
+    block-bt)
+        CONFIG_DATA['block-bt']=$(read_input "是否开启 bittorrent 屏蔽? [Y/n] :" "block-bt")
+        ;;
+    block-cn)
+        CONFIG_DATA['block-cn']=$(read_input "是否开启大陆屏蔽? [Y/n] :" "block-cn")
+        ;;
+    block-ad)
+        CONFIG_DATA['block-ad']=$(read_input "是否开启广告屏蔽? [Y/n] :" "block-ad")
+        ;;
+    port)
+        CONFIG_DATA['port']=$(read_input "请输入 port (端口范围是 1-65535 ，默认: 443): " "port")
+        ;;
+    uuid)
+        CONFIG_DATA['uuid']=$(read_input "请输入 UUID (支持自定义字符串，默认自动生成): " "uuid")
+        ;;
+    target)
+        CONFIG_DATA['target']=$(read_input "请输入目标域名 target (默认随机选择): " "target")
+        ;;
+    short)
+        read_input "请输入 shortId (多个值请用英文逗号分隔，默认自动生成): " "short"
+        ;;
+    path)
+        CONFIG_DATA['path']=$(read_input "请输入 path (默认自动生成): " "path")
+        ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: reset_json_fields
+# 功能描述: 重置 JSON 对象中指定键下的字段值。
+#           1. 如果指定了目标键 ($2)，则只重置该键下的字段。
+#           2. 如果未指定目标键，则重置整个 JSON 对象的字段。
+#           3. 保留指定的字段 ($3, $4, ...) 不变，其他字段根据类型重置为空值。
+# 参数:
+#   $1: 原始 JSON 字符串
+#   $2: 目标键名 (例如 'xray' 或 'nginx')，如果为 "null" 则重置整个对象
+#   $@: (从 $3 开始) 需要保留的字段名列表
+# 返回值: 重置后的 JSON 字符串 (echo 输出)
+# =============================================================================
+function reset_json_fields() {
+    local raw_json="$1"   # 获取原始 JSON 字符串
+    local target_key="$2" # 获取目标键名
+
+    # 移除前两个参数，剩下的就是需要保留的字段名
+    shift 2
+
+    local keep_fields=("$@") # 获取需要保留的字段名数组
+
+    # 将保留字段名数组转换为 jq 可用的 JSON 数组
+    local jq_keep
+    jq_keep=$(printf '%s\n' "${keep_fields[@]}" | jq -R . | jq -s .)
+
+    # 使用 jq 脚本进行重置操作
+    raw_json=$(echo "${raw_json}" | jq --arg key "${target_key}" --argjson keep "$jq_keep" '
+        # 定义递归函数 clear_recursive，用于清空值
+        def clear_recursive:
+            if type == "object" then with_entries(.value |= clear_recursive)
+            elif type == "array" then map(clear_recursive) | unique
+            elif type == "number" then 0
+            elif type == "boolean" then false
+            else ""
+            end;
+        # 定义函数 exec_clear，用于判断字段是否需要保留
+        def exec_clear:
+            if .key | IN($keep[]) then .
+            else .value |= clear_recursive
+            end;
+        # 根据是否指定了目标键来决定重置范围
+        if $key != "null" then .[$key] |= with_entries(exec_clear)
+        else . |= with_entries(exec_clear)
+        end
+    ')
+
+    # 输出重置后的 JSON 字符串
+    echo "${raw_json}"
+}
+
+# =============================================================================
+# 函数名称: handler_reset_script_config
+# 功能描述: 重置脚本配置文件 (config.json) 中指定部分的字段。
+#           1. 根据目标配置部分 (xray/nginx) 调用 reset_json_fields。
+#           2. 保留特定字段不变，其他字段清空。
+#           3. 将重置后的配置写回 SCRIPT_CONFIG_PATH 文件。
+# 参数:
+#   $1: TARGET_CONFIG - 目标配置部分 ("xray" 或 "nginx")，默认为 "xray"
+# 返回值: 无 (直接修改 SCRIPT_CONFIG 全局变量和 SCRIPT_CONFIG_PATH 文件)
+# =============================================================================
+function handler_reset_script_config() {
+    local TARGET_CONFIG="${1:-xray}" # 获取目标配置部分，默认为 xray
+    # 根据目标配置部分调用 reset_json_fields 进行重置
+    case "${TARGET_CONFIG,,}" in
+    xray)
+        # 重置 xray 部分，保留 version, warp, rules 字段
+        SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'xray' 'version' 'warp' 'rules')
+        ;;
+    nginx)
+        # 重置 nginx 部分，保留 version, ca 字段
+        SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'nginx' 'version' 'ca')
+        ;;
+    esac
+    # 将重置后的脚本配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: generate_uuid
+# 功能描述: 生成一个 UUID。如果系统安装了 `xray` 命令，优先使用它来生成；
+#           否则使用系统自带的 `/proc/sys/kernel/random/uuid`。
+# 参数:
+#   $1 (可选): 输入字符串，用于生成基于该输入的 UUID (需要 xray 支持)
+# 返回值: 生成的 UUID 字符串 (echo 输出)
+# =============================================================================
+function generate_uuid() {
+    local input="${1}" # 获取可选的输入参数
+    local uuid         # 声明用于存储 UUID 的局部变量
+
+    # 检查系统中是否存在 xray 命令
+    if command -v xray &>/dev/null; then
+        # 如果没有提供输入参数
+        if [[ -z "${input}" ]]; then
+            # 直接生成一个新的 UUID
+            uuid=$(xray uuid)
+        # 如果提供的输入参数已经是标准格式的 UUID
+        elif [[ "${input}" =~ ^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$ ]]; then
+            # 则直接使用该输入作为 UUID
+            uuid=${input}
+        else
+            # 否则，使用提供的输入字符串生成一个基于该输入的 UUID
+            uuid=$(xray uuid -i "${input}")
+        fi
+    else
+        # 如果没有安装 xray，则使用系统方法生成 UUID
+        uuid=$(cat /proc/sys/kernel/random/uuid)
+    fi
+    # 输出生成的 UUID
+    echo "${uuid}"
+}
+
+# =============================================================================
+# 函数名称: generate_password
+# 功能描述: 生成一个随机密码，长度在 16 到 64 个字符之间。
+#           密码由数字、大小写字母以及部分特殊字符 (!@$%*) 组成。
+# 参数: 无
+# 返回值: 生成的随机密码 (echo 输出)
+# =============================================================================
+function generate_password() {
+    # 首先生成一个 16 到 64 之间的随机数作为密码长度
+    local length
+    length="$(generate_random 16 64)"
+
+    # 从 /dev/urandom 读取随机字节，通过 tr 过滤出指定字符集，
+    # 再用 fold 按指定长度换行，最后用 head 取第一行作为密码
+    cat /dev/urandom | tr -cd '0-9a-zA-Z!@$%*' | fold -w "${length}" | head -n 1
+}
+
+# =============================================================================
+# 函数名称: generate_path
+# 功能描述: 生成一个随机的 URL 路径，以 '/' 开头。
+#           路径由 16 到 64 个随机字母和数字组成。
+# 参数: 无
+# 返回值: 生成的随机路径字符串 (echo 输出)
+# =============================================================================
+function generate_path() {
+    # 生成一个 16 到 64 之间的随机数作为路径长度
+    local length
+    length="$(generate_random 16 64)"
+
+    # 从 /dev/urandom 读取随机字节，通过 tr 过滤出字母和数字，
+    # 再用 fold 按指定长度换行，最后用 head 取第一行作为路径主体
+    local domain_path
+    domain_path="$(cat /dev/urandom | tr -cd 'a-zA-Z0-9' | fold -w "${length}" | head -n 1)"
+
+    # 在路径主体前加上 '/' 并输出
+    echo "/${domain_path}"
+}
+
+# =============================================================================
+# 函数名称: generate_random
+# 功能描述: 生成一个随机数。如果不提供参数或参数无效，则生成一个无符号32位随机整数；
+#           如果提供了有效的最小值和最大值，则生成该范围内的随机整数。
+# 参数:
+#   $1 (可选): 自定义最小值 (custom_min)
+#   $2 (可选): 自定义最大值 (custom_max)
+# 返回值: 生成的随机数 (echo 输出)
+# =============================================================================
+function generate_random() {
+    local custom_min=${1} # 获取第一个参数作为自定义最小值
+    local custom_max=${2} # 获取第二个参数作为自定义最大值
+
+    # 使用 /dev/urandom 生成一个无符号32位随机整数
+    local random
+    random=$(od -An -N4 -tu4 </dev/urandom)
+
+    # 检查自定义的最小值和最大值是否为有效正整数，并且最小值小于最大值
+    if [[ ${custom_min} =~ ^[0-9]+$ && ${custom_max} =~ ^[0-9]+$ ]] && ((custom_min < custom_max)); then
+        # 计算范围大小
+        local range=$((custom_max - custom_min + 1))
+        # 使用取模运算将随机数映射到指定范围内，并加上最小值偏移
+        echo $((random % range + custom_min))
+    else
+        # 如果参数无效，则直接输出原始随机数
+        echo "${random}"
+    fi
+}
+
+# =============================================================================
+# 函数名称: generate_target
+# 功能描述: 从配置文件 ${SCRIPT_CONFIG_PATH} 的 'target' 键中，
+#           随机选择一个键名作为目标。
+# 参数: 无 (依赖内部 generate_random 生成随机索引)
+# 返回值: 随机选中的 target 键名 (echo 输出)
+# 注意: 需要确保 ${SCRIPT_CONFIG_PATH} 文件存在且格式正确 (包含 .target 键)
+# =============================================================================
+function generate_target() {
+    # 生成一个随机数作为索引
+    local random
+    random="$(generate_random)"
+
+    # 使用 jq 读取配置文件，获取 .target 对象的所有键名(keys)，
+    # 然后计算随机索引对键名数组长度取模，从而随机选择一个键名
+    jq -r --argjson random "${random}" '.target | keys | .[$random % length?]' "${SCRIPT_CONFIG_PATH}"
+}
+
+# =============================================================================
+# 函数名称: generate_server_names
+# 功能描述: 为给定的 target 生成或获取其对应的服务器名称列表。
+#           如果 target 在配置文件中不存在，则将其添加到 .target 对象中，
+#           其值为一个仅包含该 target 名称的数组。
+#           最后返回该 target 对应的服务器名称数组。
+# 参数:
+#   $1: 目标名称 (target)
+# 返回值: JSON 格式的数组，包含服务器名称 (echo 输出)
+# 注意: 会修改 ${SCRIPT_CONFIG_PATH} 文件内容
+# =============================================================================
+function generate_server_names() {
+    local target=${1} # 获取目标名称参数
+
+    # 使用 jq 读取并可能修改配置文件内容：
+    # 如果 .target 对象中已存在 $key (即 $target)，
+    # 则返回原配置；
+    # 否则，将新的键值对 ($target: [$target]) 添加到 .target 对象中
+    local SCRIPT_CONFIG_LOCAL
+    SCRIPT_CONFIG_LOCAL=$(jq --arg key "${target}" '
+    if .target | has($key) then
+        .
+    else
+        .target += { ($key): [$key] }
+    end
+    ' "${SCRIPT_CONFIG_PATH}")
+
+    # 将修改后的配置内容写回配置文件
+    echo "${SCRIPT_CONFIG_LOCAL}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+
+    # 从修改后的配置中提取并输出指定 target 的服务器名称列表
+    echo "${SCRIPT_CONFIG_LOCAL}" | jq --arg key "${target}" '.target[$key]'
+}
+
+# =============================================================================
+# 函数名称: generate_short_id
+# 功能描述: 生成一个指定长度的 Short ID (十六进制字符串)。
+#           如果输入是 0-8 的数字，则生成对应长度的 ID；
+#           如果输入是 0，则返回空字符串；
+#           其他情况（包括非数字输入）则随机生成 0-8 位的 ID。
+# 参数:
+#   $1 (可选): 指定的长度 (0-8) 或任意输入
+# 返回值: 生成的 Short ID (echo 输出)
+# 注意: 需要 openssl 命令支持
+# =============================================================================
+function generate_short_id() {
+    local input=$1 # 获取输入参数
+
+    # 使用 sed 去除输入参数首尾的空白字符
+    local trimmed_input
+    trimmed_input=$(echo "$input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    local length # 声明存储最终长度的变量
+
+    # 检查处理后的输入是否为 0-8 的数字
+    if [[ $trimmed_input =~ ^[0-8]$ ]]; then
+        # 如果是，则使用该数字作为长度
+        length=$trimmed_input
+    else
+        # 如果不是，则生成一个 0-8 之间的随机长度
+        length=$(generate_random 0 8)
+    fi
+
+    # 如果长度为 0，则输出空字符串
+    # 否则，使用 openssl 生成指定长度的十六进制随机字符串
+    if [[ $length -eq 0 ]]; then
+        printf '%s\n' ""
+    else
+        openssl rand -hex "$length"
+    fi
+}
+
+# =============================================================================
+# 函数名称: generate_short_ids
+# 功能描述: 批量生成多个 Short ID。
+#           对于每个输入参数：如果是 0-8 的数字，则生成对应长度的 ID；
+#           否则，直接将输入作为 ID (需为十六进制字符串)。
+#           最终输出一个去重并按长度排序的 JSON 数组。
+# 参数:
+#   $@: 一系列参数，每个参数代表一个 Short ID 的生成要求或直接值
+# 返回值: JSON 格式的数组，包含去重并排序后的 Short ID (echo 输出)
+# 注意: 依赖 jq 进行数组处理和去重排序
+# =============================================================================
+function generate_short_ids() {
+    local -a ids=()  # 声明一个数组用于存储生成的 ID
+    local -a args=() # 声明一个数组用于存储输入参数
+
+    # 将所有输入参数按空格分割并存入 args 数组
+    IFS=' ' read -r -a args <<<"$@"
+
+    # 遍历每个输入参数
+    for arg in "${args[@]}"; do
+        # 如果参数是 0-8 的数字
+        if [[ $arg =~ ^[0-8]$ ]]; then
+            # 调用 generate_short_id 生成对应长度的 ID，
+            # 并使用 jq -R 将其转换为 JSON 字符串格式后添加到 ids 数组
+            ids+=("$(generate_short_id "${arg}" | jq -R)")
+        else
+            # 如果不是数字，则直接将参数作为 ID 值，
+            # 同样使用 jq -R 转换为 JSON 字符串格式后添加到 ids 数组
+            ids+=("$(printf '%s' "${arg}" | jq -R)")
+        fi
+    done
+
+    # 将 ids 数组中的所有元素作为独立参数传递给 echo，
+    # 然后通过管道传递给 jq：
+    # -s : 将多个输入项收集到一个数组中
+    # unique : 对数组进行去重
+    # sort_by(length) : 按字符串长度对数组元素进行排序
+    echo "${ids[@]}" | jq -s 'unique | sort_by(length)'
+}
+
+# =============================================================================
+# 函数名称: handler_script_config
+# 功能描述: 处理并更新脚本配置文件 (config.json)。
+#           1. 打印配置更新提示。
+#           2. 调用 handler_reset_script_config 重置配置。
+#           3. 从 CONFIG_DATA 中获取或生成配置值。
+#           4. 根据配置标签 (tag) 更新不同的字段。
+#           5. 将更新后的配置写回 SCRIPT_CONFIG_PATH 文件。
+# 参数:
+#   $1: CONFIG_TAG - 配置标签 (例如 Vision, XHTTP, SNI 等)，默认从 CONFIG_DATA 获取
+# 返回值: 无 (直接修改 SCRIPT_CONFIG 全局变量和 SCRIPT_CONFIG_PATH 文件)
+# =============================================================================
+function handler_script_config() {
+
+    # 打印绿色的配置更新提示
+    _info "正在更新脚本配置 ... "
+
+    # 重置脚本配置 (默认重置 xray 部分)
+    handler_reset_script_config
+
+    # 从 CONFIG_DATA 或生成器获取配置值
+    # 获取配置标签
+    local CONFIG_TAG="${1:-${CONFIG_DATA['tag']}}"
+    # 获取规则状态
+    local XRAY_RULES_STATUS="${CONFIG_DATA['rules']}"
+    # 获取 block bt 状态
+    local XRAY_RULES_BT="${CONFIG_DATA['block-bt']}"
+    # 获取 block cn 状态
+    local XRAY_RULES_CN="${CONFIG_DATA['block-cn']}"
+    # 获取 block ad 状态
+    local XRAY_RULES_AD="${CONFIG_DATA['block-ad']}"
+    # 获取端口，默认 443
+    local XRAY_PORT="${CONFIG_DATA['port']:-443}"
+    # 获取或生成 UUID
+    local XRAY_UUID
+    XRAY_UUID="$(generate_uuid "${CONFIG_DATA['uuid']}")"
+    # 获取或生成 Fallback UUID
+    local FALLBACK_UUID
+    FALLBACK_UUID="${CONFIG_DATA['fallback']:-$(generate_uuid)}"
+    # 获取或生成 Trojan 密码
+    local TROJAN_PASSWORD
+    TROJAN_PASSWORD="${CONFIG_DATA['password']:-$(generate_password)}"
+    # 获取或生成 mKCP Seed
+    local KCP_SEED="${CONFIG_DATA['seed']:-$(generate_password)}"
+    # 获取或生成 XHTTP 路径
+    local XHTTP_PATH
+    XHTTP_PATH="${CONFIG_DATA['path']:-$(generate_path)}"
+    # 获取或生成目标域名
+    local TARGET_DOMAIN
+    TARGET_DOMAIN="${CONFIG_DATA['target']:-$(generate_target)}"
+    # 生成服务器名称列表
+    local SERVER_NAMES
+    SERVER_NAMES="$(generate_server_names "${TARGET_DOMAIN}")"
+    # 获取 CDN 域名
+    # local CDN_DOMAIN="${CONFIG_DATA['cdn']}"
+    # 获取或生成 Short IDs
+    local SHORT_IDS
+    SHORT_IDS="$(generate_short_ids "${CONFIG_DATA['short_ids']:-8 8}")"
+    # 获取 CA 邮箱
+    # local CA_EMAIL="${CONFIG_DATA['email']}"
+
+    # 更新脚本配置中的规则状态
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg reset "${XRAY_RULES_STATUS,,}" ' if $reset != "n" then .xray.rules.reset = 1 else .xray.rules.reset = 0 end ')"
+    # 更新脚本配置中的 block bt 状态
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg bt "${XRAY_RULES_BT,,}" ' if $bt != "n" then .xray.rules.bt = 1 else .xray.rules.bt = 0 end ')"
+    # 更新脚本配置中的 block cn 状态
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg cn "${XRAY_RULES_CN,,}" ' if $cn != "n" then .xray.rules.cn = 1 else .xray.rules.cn = 0 end ')"
+    # 更新脚本配置中的 block ad 状态
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg ad "${XRAY_RULES_AD,,}" ' if $ad != "n" then .xray.rules.ad = 1 else .xray.rules.ad = 0 end ')"
+
+    # 根据配置标签更新特定字段
+    case "${CONFIG_TAG,,}" in
+    trojan)
+        # 更新 Trojan 密码
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg password "${TROJAN_PASSWORD}" '.xray.trojan = $password')"
+        ;;
+    mkcp | vision | xhttp | fallback | sni)
+        # 更新 UUID
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${XRAY_UUID}" '.xray.uuid = $uuid')"
+        ;;
+    esac
+    # 根据配置标签更新特定字段 (第二部分)
+    # case "${CONFIG_TAG,,}" in
+    # fallback)
+    #     # 更新 Fallback UUID
+    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.xray.fallback = $uuid')"
+    #     ;;
+    # mkcp)
+    #     # 为 mKCP 生成随机端口并更新 Seed
+    #     XRAY_PORT="$(exec_generate '--port')"
+    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg seed "${KCP_SEED}" '.xray.kcp = $seed')"
+    #     ;;
+    # sni)
+    #     # 更新 Fallback UUID
+    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.xray.fallback = $uuid')"
+    #     # 为 SNI 更新 CA 邮箱、域名和 CDN
+    #     [[ -n "${CA_EMAIL}" ]] && SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg ca "${CA_EMAIL}" '.nginx.ca = $ca')"
+    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg domain "${TARGET_DOMAIN}" '.nginx.domain = $domain')"
+    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg cdn "${CDN_DOMAIN}" '.nginx.cdn = $cdn')"
+    #     ;;
+    # esac
+    # 根据配置标签更新特定字段 (第三部分)
+    case "${CONFIG_TAG,,}" in
+    xhttp | trojan | fallback | sni)
+        # 更新路径
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.xray.path = $path')"
+        ;;
+    esac
+    # 根据配置标签更新特定字段 (第四部分)
+    case "${CONFIG_TAG,,}" in
+    vision | xhttp | trojan | fallback | sni)
+        # 更新目标域名、服务器名称和 Short IDs
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg target "${TARGET_DOMAIN}" '.xray.target = $target')"
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson serverNames "${SERVER_NAMES}" '.xray.serverNames = $serverNames')"
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson shortIds "${SHORT_IDS}" '.xray.shortIds = $shortIds')"
+        ;;
+    esac
+    # 更新配置标签和端口
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg tag "${CONFIG_TAG}" '.xray.tag = $tag')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson port "${XRAY_PORT}" '.xray.port = $port')"
+    # 将更新后的脚本配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: handler_install
+# 功能描述: 安装 Xray 核心。
+#           1. 确定要安装的 Xray 版本。
+#           2. 检查系统中是否已安装 Xray。
+#           3. 如果未安装或强制安装，则从 Xray-install 脚本安装。
+# 参数:
+#   $1: xray_version - (可选) 要安装的 Xray 版本
+#   $2: force_install - (可选) 是否强制安装 ('y' 表示强制)，默认为 'n'
+# 返回值: 无 (通过调用外部脚本执行安装)
+# =============================================================================
+function handler_install() {
+    # local xray_version="$1"       # 获取版本参数
+    local force_install="${2:-n}" # 获取强制安装参数，默认为 'n'
+
+    # # 如果提供了版本参数，则处理版本配置
+    # if [[ -n "${xray_version}" ]]; then
+    #     handler_xray_version "${xray_version}"
+    # else
+    #     # 否则从脚本配置中读取版本
+    #     CONFIG_DATA['version']="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.version')"
+    # fi
+
+    # 检查 Xray 命令是否存在，或是否强制安装
+    if ! cmd_exists 'xray' || [[ "${force_install}" != n ]]; then
+        # 调用 Xray-install 脚本进行安装
+        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root #--version "${CONFIG_DATA['version']}"
+    fi
+}
+
+# =============================================================================
+# 函数名称: generate_x25519
+# 功能描述: 使用 xray 命令生成一对 X25519 密钥（私钥和公钥）。
+# 参数: 无
+# 返回值: 以逗号分隔的字符串 "私钥,公钥" (echo 输出)
+# 注意: 需要确保系统已安装 xray 命令
+# =============================================================================
+function generate_x25519() {
+    # 调用 xray x25519 命令生成密钥对，输出通常为两行：
+    # Private key: <private_key>
+    # Public key: <public_key>
+    local X25519_KEY
+    X25519_KEY=$(xray x25519)
+
+    # 使用 sed 提取第一行中的私钥部分
+    local PRIVATE_KEY
+    PRIVATE_KEY=$(echo "${X25519_KEY}" | sed -ne '1s/.*:\s*//p')
+    # 使用 sed 提取第二行中的公钥部分
+    local PUBLIC_KEY
+    PUBLIC_KEY=$(echo "${X25519_KEY}" | sed -ne '2s/.*:\s*//p')
+    # 使用 sed 提取第三行中的哈希部分
+    local HASH32
+    HASH32=$(echo "${X25519_KEY}" | sed -ne '3s/.*:\s*//p')
+
+    # 将私钥和公钥，以及哈希用逗号连接后输出
+    echo "${PRIVATE_KEY},${PUBLIC_KEY},${HASH32}"
+}
+
+# =============================================================================
+# 函数名称: handler_x25519_config
+# 功能描述: 处理并更新脚本配置文件 (config.json)。
+#           1. 获取 X25519 密钥对。
+#           2. 将 X25519 密钥对写入 SCRIPT_CONFIG_PATH 文件。
+# 参数: 无
+# 返回值: 无 (直接修改 SCRIPT_CONFIG 全局变量和 SCRIPT_CONFIG_PATH 文件)
+# =============================================================================
+function handler_x25519_config() {
+    # 打印绿色的配置更新提示
+    # echo -e "${GREEN}[$(echo "$I18N_DATA" | jq -r '.title.config')]${NC} $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.script.config_update")" >&2
+    _info "正在更新脚本配置 ..."
+
+    # 生成 X25519 密钥对
+    local X25519
+    X25519=$(generate_x25519)
+    # 提取私钥
+    local PRIVATE_KEY
+    PRIVATE_KEY="$(echo "${X25519}" | awk -F, '{print $1}')"
+    # 提取公钥
+    local PUBLIC_KEY
+    PUBLIC_KEY="$(echo "${X25519}" | awk -F, '{print $2}')"
+    # 提取 Hash32
+    local HASH32
+    HASH32="$(echo "${X25519}" | awk -F, '{print $3}')"
+
+    # 输出显示 x25519 密钥对
+    # echo -e "${GREEN}[Private Key]${NC} "${PRIVATE_KEY}"" >&2
+    # echo -e "${GREEN}[Public Key]${NC} "${PUBLIC_KEY}"" >&2
+    # echo -e "${GREEN}[Hash32]${NC} "${HASH32}"" >&2
+    _info "Private Key: ${PRIVATE_KEY}"
+    _info "Public Key: ${PUBLIC_KEY}"
+    _info "Hash32: ${HASH32}"
+
+    # 更新脚本配置中的私钥和公钥，以及哈希值
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg privateKey "${PRIVATE_KEY}" '.xray.privateKey = $privateKey')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg publicKey "${PUBLIC_KEY}" '.xray.publicKey = $publicKey')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg hash32 "${HASH32}" '.xray.hash32 = $hash32')"
+    # 将更新后的脚本配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: add_rule
+# 功能描述: 在 Xray 配置的 routing.rules 中添加或更新路由规则。
+#           1. 检查是否存在具有相同 ruleTag 的规则。
+#           2. 如果存在且是 domain 或 ip 规则，则追加新值。
+#           3. 如果不存在，则创建新规则。
+#           4. 新规则可以插入到指定位置或相对于其他规则的位置。
+#           5. 更新后的配置写入 XRAY_CONFIG_PATH 文件。
+# 参数:
+#   $1: rule_tag - 规则标签 (ruleTag)，用于唯一标识规则
+#   $2: domain_or_ip - 规则类型 ("domain" 或 "ip")
+#   $3: value - 要添加的值 (可以是逗号分隔的多个值)
+#   $4: outboundTag - 出站标签 (例如 "block", "warp")
+#   $5: position - (可选) 插入位置或相对于 target_tag 的位置 ("before", "after", 数字索引)
+#   $6: target_tag - (可选) 用于定位插入位置的参考规则标签
+# 返回值: 无 (直接修改 XRAY_CONFIG_PATH 文件)
+# =============================================================================
+function add_rule() {
+    local rule_tag=$1     # 获取规则标签
+    local domain_or_ip=$2 # 获取规则类型 (domain/ip)
+    # 将逗号分隔的值转换为 JSON 数组
+    local value
+    value=$(echo "$3" | tr ',' '\n' | jq -R | jq -s)
+    local outboundTag=$4 # 获取出站标签
+    local position=$5    # 获取插入位置参数
+    local target_tag=$6  # 获取目标规则标签参数
+    # 如果 XRAY_CONFIG 未初始化，则从文件加载
+    XRAY_CONFIG="${XRAY_CONFIG:-$(jq '.' "${XRAY_CONFIG_PATH}")}"
+    # 检查是否存在具有相同 ruleTag 的规则
+    local existing_rule
+    existing_rule=$(echo "${XRAY_CONFIG}" | jq -r --arg ruleTag "${rule_tag}" '.routing.rules[] | select(.ruleTag == $ruleTag)')
+    # 如果规则已存在
+    if [[ "${existing_rule}" ]]; then
+        # 如果是 domain 规则
+        if [[ "${domain_or_ip}" == "domain" ]]; then
+            # 将新值追加到现有 domain 数组并去重
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg ruleTag "${rule_tag}" --argjson value "${value}" '.routing.rules |= map(if .ruleTag == $ruleTag then .domain += $value | .domain |= unique else . end)')"
+        # 如果是 ip 规则
+        elif [[ "${domain_or_ip}" == "ip" ]]; then
+            # 将新值追加到现有 ip 数组并去重
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg ruleTag "${rule_tag}" --argjson value "${value}" '.routing.rules |= map(if .ruleTag == $ruleTag then .ip += $value | .ip |= unique else . end)')"
+        fi
+    else
+        # 规则不存在，创建新的规则 JSON 对象
+        local new_rule="[{\"ruleTag\":\"${rule_tag}\",\"${domain_or_ip}\":${value},\"outboundTag\":\"${outboundTag}\"}]"
+        # 如果指定了 target_tag
+        if [[ -n "${target_tag}" ]]; then
+            # 检查 target_tag 对应的规则是否存在
+            local target_rule
+            target_rule=$(echo "${XRAY_CONFIG}" | jq -r --arg ruleTag "${target_tag}" '.routing.rules[] | select(.ruleTag == $ruleTag)')
+            if [[ "${target_rule}" ]]; then
+                # 获取 target_tag 对应规则的索引
+                local target_index
+                target_index=$(echo "${XRAY_CONFIG}" | jq -r --arg ruleTag "${target_tag}" '.routing.rules | to_entries | map(select(.value.ruleTag == $ruleTag)) | .[0].key')
+                # 根据 position 参数决定插入位置
+                if [[ "${position}" == "before" ]]; then
+                    # 插入到 target_tag 规则之前
+                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index "${target_index}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + $new_rule + .[$target_index:]')"
+                elif [[ "${position}" == "after" ]]; then
+                    # 插入到 target_tag 规则之后
+                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index $((target_index + 1)) --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + $new_rule + .[$target_index:]')"
+                else
+                    # 默认追加到末尾
+                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+                fi
+            else
+                # target_tag 规则不存在，追加到末尾
+                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+            fi
+        else
+            # 未指定 target_tag
+            # 如果指定了数字位置
+            if [[ -n "${position}" && "${position}" -ge 0 ]]; then
+                # 插入到指定索引位置
+                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson position "${position}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$position] + $new_rule + .[$position:]')"
+            else
+                # 默认追加到末尾
+                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+            fi
+        fi
+    fi
+    # 将更新后的 Xray 配置写入文件
+    echo "${XRAY_CONFIG}" >"${XRAY_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: handler_xray_config
+# 功能描述: 处理并更新 Xray 核心配置文件 (/usr/local/etc/xray/config.json)。
+#           1. 打印配置更新提示。
+#           2. 从脚本配置中读取各项参数。
+#           3. 加载对应配置标签的模板文件。
+#           4. 根据配置标签和参数替换模板中的占位符。
+#           5. 处理路由规则 (保留当前规则或重置并添加默认规则)。
+#           6. 将更新后的配置写回 XRAY_CONFIG_PATH 和 SCRIPT_CONFIG_PATH 文件。
+# 参数: 无
+# 返回值: 无 (直接修改 XRAY_CONFIG 全局变量和 XRAY_CONFIG_PATH/SCRIPT_CONFIG_PATH 文件)
+# =============================================================================
+function handler_xray_config() {
+    # 打印绿色的 Xray 配置更新提示
+    # echo -e "${GREEN}[$(echo "$I18N_DATA" | jq -r '.title.config')]${NC} $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.xray.config_update")" >&2
+    _info "正在更新 Xray 配置 ..."
+
+    # 从脚本配置中读取各项参数
+    local CONFIG_TAG
+    CONFIG_TAG="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.tag')" # 获取配置标签
+    local XRAY_PORT
+    XRAY_PORT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.port')" # 获取端口
+    local XRAY_UUID
+    XRAY_UUID="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.uuid')" # 获取 UUID
+    local FALLBACK_UUID
+    FALLBACK_UUID="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.fallback')" # 获取 Fallback UUID
+    local TROJAN_PASSWORD
+    TROJAN_PASSWORD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.trojan')" # 获取 Trojan 密码
+    local KCP_SEED
+    KCP_SEED="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.kcp')" # 获取 mKCP Seed
+    local TARGET_DOMAIN
+    TARGET_DOMAIN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.target')" # 获取目标域名
+    local SERVER_NAMES
+    SERVER_NAMES="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.serverNames')" # 获取服务器名称
+    local PRIVATE_KEY
+    PRIVATE_KEY="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.privateKey')" # 获取私钥
+    local SHORT_IDS
+    SHORT_IDS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.shortIds')" # 获取 Short IDs
+    local XHTTP_PATH
+    XHTTP_PATH="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path')" # 获取路径
+    local XRAY_RULES_STATUS
+    XRAY_RULES_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset')" # 获取规则状态
+    local XRAY_RULES_BT
+    XRAY_RULES_BT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.bt')" # 获取 bt 规则状态
+    local XRAY_RULES_CN
+    XRAY_RULES_CN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.cn')" # 获取 cn 规则状态
+    local XRAY_RULES_AD
+    XRAY_RULES_AD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.ip')" # 获取 ad 规则状态
+    local XRAY_RULES
+    XRAY_RULES="$(echo "${SCRIPT_CONFIG}" | jq -r '.rules')" # 获取路由规则
+    local WARP_STATUS
+    WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp')" # 获取 WARP 状态
+
+    # 加载对应配置标签的 Xray 配置模板
+    XRAY_CONFIG="$(jq '.' "${SCRIPT_CONFIG_DIR}/config/${CONFIG_TAG}.json")"
+    # 如果配置标签不是 sni，则更新端口
+    if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson port "${XRAY_PORT}" '.inbounds[1].port = $port')"
+    fi
+    # 根据配置标签更新特定字段 (第一部分)
+    case "${CONFIG_TAG,,}" in
+    mkcp | vision | xhttp | fallback | sni)
+        # 更新客户端 UUID
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg uuid "${XRAY_UUID}" '.inbounds[1].settings.clients[0].id = $uuid')"
+        ;;
+    trojan)
+        # 更新 Trojan 客户端密码
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg password "${TROJAN_PASSWORD}" '.inbounds[1].settings.clients[0].password = $password')"
+        ;;
+    esac
+    # 根据配置标签更新特定字段 (第二部分)
+    case "${CONFIG_TAG,,}" in
+    mkcp)
+        # 更新 mKCP Seed
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '.inbounds[1].streamSettings.kcpSettings.seed = $seed')"
+        ;;
+    vision | xhttp | trojan | fallback | sni)
+        # 如果不是 sni 配置，更新 Reality 目标
+        if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg target "${TARGET_DOMAIN}:443" '.inbounds[1].streamSettings.realitySettings.target = $target')"
+        fi
+        # 更新 Reality 服务器名称、私钥和 Short IDs
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson serverNames "${SERVER_NAMES}" '.inbounds[1].streamSettings.realitySettings.serverNames = $serverNames')"
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg privateKey "${PRIVATE_KEY}" '.inbounds[1].streamSettings.realitySettings.privateKey = $privateKey')"
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson shortIds "${SHORT_IDS}" '.inbounds[1].streamSettings.realitySettings.shortIds = $shortIds')"
+        ;;
+    esac
+    # 根据配置标签更新特定字段 (第三部分)
+    case "${CONFIG_TAG,,}" in
+    xhttp | trojan)
+        # 更新 XHTTP 路径
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.inbounds[1].streamSettings.xhttpSettings.path = $path')"
+        ;;
+    fallback | sni)
+        # 更新 Fallback 客户端 UUID 和 XHTTP 路径
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.inbounds[2].settings.clients[0].id = $uuid')"
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.inbounds[2].streamSettings.xhttpSettings.path = $path')"
+        ;;
+    esac
+    # 处理路由规则
+    case "${XRAY_RULES_STATUS}" in
+    0)
+        # 保留当前路由规则
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.routing.rules = $rules')"
+        ;;
+    1)
+        # 重置并添加默认路由规则
+        [[ "${XRAY_RULES_BT}" -eq 1 ]] && add_rule "bt" "protocol" "bittorrent" "block" 1
+        [[ "${XRAY_RULES_CN}" -eq 1 ]] && add_rule "cn-ip" "ip" "geoip:cn" "block" "after" "private-ip"
+        [[ "${XRAY_RULES_AD}" -eq 1 ]] && add_rule "ad-domain" "domain" "geosite:category-ads-all" "block"
+        ;;
+    esac
+    # 处理 WARP 状态
+    if [[ ${WARP_STATUS} -eq 1 ]]; then
+        # 获取 WARP 容器 IP
+        local container_ip
+        container_ip="$(exec_docker '--obtain-container-ip')"
+        # 构造 WARP Socks 出站配置 JSON
+        local socks_config='[{"tag":"warp","protocol":"socks","settings":{"servers":[{"address":"'"${container_ip}"'","port":40001}]}}]'
+        # 将 WARP 出站配置添加到 Xray 配置中
+        XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq --argjson socks_config "${socks_config}" '.outbounds += $socks_config')
+    fi
+    # 获取更新后的路由规则
+    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
+    # 更新脚本配置中的路由规则
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
+    # 将更新后的脚本配置和 Xray 配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+    echo "${XRAY_CONFIG}" >"${XRAY_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: cache_json_data
+# 功能描述: 将 Xray 和脚本的配置文件内容读取到全局变量中进行缓存，
+#           避免重复读取文件，提高脚本执行效率。
+# 参数: 无
+# 返回值: 无 (直接修改全局变量 XRAY_CONFIG 和 SCRIPT_CONFIG)
+# =============================================================================
+function cache_json_data() {
+    # 读取 Xray 配置文件的完整 JSON 内容到全局变量 XRAY_CONFIG
+    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
+    # 读取脚本配置文件的完整 JSON 内容到全局变量 SCRIPT_CONFIG
+    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
+}
+
+# =============================================================================
+# 函数名称: get_common_config
+# 功能描述: 从缓存的 Xray 和脚本配置中提取指定 inbound 索引的通用客户端配置参数，
+#           并存储到 CLIENT_CONFIG 关联数组中。
+# 参数:
+#   $1: Xray 配置中 inbound 数组的索引 (inbound_index)
+# 返回值: 无 (直接修改全局变量 CLIENT_CONFIG)
+# =============================================================================
+function get_common_config() {
+    local inbound_index=$1 # 获取 inbound 索引参数
+
+    # 获取服务器的公网 IPv4 地址作为远程主机地址
+    CLIENT_CONFIG[remote_host]="$(curl -fsSL ipv4.icanhazip.com)"
+    # 从脚本配置中获取端口号
+    CLIENT_CONFIG[port]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.port")"
+    # 从脚本配置中获取 Reality 公钥
+    CLIENT_CONFIG[public_key]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.publicKey")"
+    # 从脚本配置中获取配置标签 (tag)
+    CLIENT_CONFIG[tag]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.tag")"
+
+    # 从 Xray 配置中获取协议类型 (如 vless, trojan)
+    CLIENT_CONFIG[protocol]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].protocol? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取客户端 UUID (VLESS) 或密码 (Trojan)
+    CLIENT_CONFIG[uuid]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].id? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取客户端密码 (Trojan)
+    CLIENT_CONFIG[password]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取 mKCP 的种子 (seed)
+    CLIENT_CONFIG[seed]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.kcpSettings.seed? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取网络传输类型 (如 tcp, kcp, xhttp)
+    CLIENT_CONFIG[type]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取 Flow 控制参数 (如 xtls-rprx-vision)
+    CLIENT_CONFIG[flow]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].flow? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取安全传输类型 (如 none, tls, reality)
+    CLIENT_CONFIG[security]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? | if . == null then empty else . end')"
+    # 从 Xray 配置中获取 XHTTP 的路径 (path)
+    CLIENT_CONFIG[path]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? | if . == null then empty else . end')"
+    # 从 Xray 配置中随机获取一个 Reality 的服务器名称 (serverNames)
+    CLIENT_CONFIG[server_name]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(generate_random)" '.inbounds[$i].streamSettings.realitySettings.serverNames? | if . == null then empty else .[$random % length] end')"
+    # 从 Xray 配置中随机获取一个 Reality 的 Short ID (shortIds)
+    CLIENT_CONFIG[short_id]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(generate_random)" '.inbounds[$i].streamSettings.realitySettings.shortIds? | if . == null then empty else .[$random % length] end')"
+}
+
+# =============================================================================
+# 函数名称: get_share_link_component
+# 功能描述: 根据当前 CLIENT_CONFIG 中的参数，生成分享链接的各个组成部分。
+#           这些组件可以被后续的特定链接生成函数组合使用。
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG)
+# 返回值: 无 (直接修改一系列 SHARE_LINK_COMPONENT_* 全局变量)
+# =============================================================================
+function get_share_link_component() {
+    # 生成 VLESS 协议基础链接部分 (协议://UUID@地址:端口?网络类型=...)
+    SHARE_LINK_COMPONENT_VLESS="${CLIENT_CONFIG[protocol]}://${CLIENT_CONFIG[uuid]}@${CLIENT_CONFIG[remote_host]}:${CLIENT_CONFIG[port]}?type=${CLIENT_CONFIG[type]}"
+
+    # # 生成 Trojan 协议基础链接部分 (协议://密码@地址:端口?网络类型=...)
+    # SHARE_LINK_COMPONENT_TROJAN="${CLIENT_CONFIG[protocol]}://${CLIENT_CONFIG[password]}@${CLIENT_CONFIG[remote_host]}:${CLIENT_CONFIG[port]}?type=${CLIENT_CONFIG[type]}"
+    # # 生成 mKCP 网络传输参数部分 (&seed=...)
+    # SHARE_LINK_COMPONENT_MKCP="&seed=${CLIENT_CONFIG[seed]}"
+    # # 生成 TLS 安全传输参数部分 (&security=tls&sni=...&alpn=h2&fp=chrome)
+    # SHARE_LINK_COMPONENT_TLS="&security=${CLIENT_CONFIG[security]}&sni=${CLIENT_CONFIG[server_name]}&alpn=h2&fp=chrome"
+
+    # 生成 Reality 安全传输参数部分 (&security=reality&sni=...&pbk=...&sid=...&spx=%2F&fp=chrome)
+    SHARE_LINK_COMPONENT_REALITY="&security=${CLIENT_CONFIG[security]}&sni=${CLIENT_CONFIG[server_name]}&pbk=${CLIENT_CONFIG[public_key]}&sid=${CLIENT_CONFIG[short_id]}&spx=%2F&fp=chrome"
+    # 生成 XHTTP 网络传输路径参数部分 (&path=...), 注意去除路径开头的 '/'
+    SHARE_LINK_COMPONENT_XHTTP="&path=%2F${CLIENT_CONFIG[path]#/}"
+    # 生成 Flow 控制参数部分 (&flow=...)
+    SHARE_LINK_COMPONENT_FLOW="&flow=${CLIENT_CONFIG[flow]}"
+
+    # # 生成额外参数部分 (&extra=...), 使用之前编码好的 XHTTP_EXTRA_ENCODED
+    # SHARE_LINK_COMPONENT_EXTRA="&extra=${XHTTP_EXTRA_ENCODED}"
+
+}
+
+# =============================================================================
+# 函数名称: get_xhttp_share_link
+# 功能描述: 为 XHTTP + Reality 网络传输类型生成完整的分享链接。
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG 和 XHTTP_EXTRA)
+# 返回值: 无 (直接修改全局变量 SHARE_LINK)
+# =============================================================================
+function get_xhttp_share_link() {
+    # 获取分享链接的各个组件
+    get_share_link_component
+    # 将 VLESS 基础部分、Reality 安全参数和 XHTTP 路径参数拼接成完整链接
+    SHARE_LINK="${SHARE_LINK_COMPONENT_VLESS}${SHARE_LINK_COMPONENT_REALITY}${SHARE_LINK_COMPONENT_XHTTP}"
+}
+
+# =============================================================================
+# 函数名称: get_vision_share_link
+# 功能描述: 为 Vision (XTLS) + Reality 网络传输类型生成完整的分享链接。
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG)
+# 返回值: 无 (直接修改全局变量 SHARE_LINK)
+# =============================================================================
+function get_vision_share_link() {
+    # 获取分享链接的各个组件
+    get_share_link_component
+    # 将 VLESS 基础部分、Reality 安全参数和 Flow 控制参数拼接成完整链接
+    SHARE_LINK="${SHARE_LINK_COMPONENT_VLESS}${SHARE_LINK_COMPONENT_REALITY}${SHARE_LINK_COMPONENT_FLOW}"
+}
+
+# =============================================================================
+# 函数名称: show_client_config
+# 功能描述: 在终端打印格式化的客户端配置信息。
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG)
+# 返回值: 无 (直接打印到标准输出)
+# =============================================================================
+function show_client_config() {
+    # 使用 Here Document 打印客户端配置的标题和各项参数
+    cat <<EOF
+------------------ 客户端配置 (${CLIENT_CONFIG[tag]}) ------------------
+address          : ${CLIENT_CONFIG[remote_host]}
+port             : ${CLIENT_CONFIG[port]}
+protocol         : ${CLIENT_CONFIG[protocol]}
+uuid             : ${CLIENT_CONFIG[uuid]}
+password(trojan) : ${CLIENT_CONFIG[password]}
+seed(mKCP)       : ${CLIENT_CONFIG[seed]}
+flow             : ${CLIENT_CONFIG[flow]}
+network          : ${CLIENT_CONFIG[type]}
+security         : ${CLIENT_CONFIG[security]}
+ServerName       : ${CLIENT_CONFIG[server_name]}
+path             : ${CLIENT_CONFIG[path]}
+Fingerprint      : chrome
+PublicKey        : ${CLIENT_CONFIG[public_key]}
+ShortId          : ${CLIENT_CONFIG[short_id]}
+SpiderX          : /
+EOF
+}
+
+# =============================================================================
+# 函数名称: show_config
+# 功能描述: 打印完整的客户端配置信息、额外配置 (如果有的话)、
+#           最终的分享链接以及对应的二维码。
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG, XHTTP_EXTRA, SHARE_LINK, I18N_DATA)
+# 返回值: 无 (直接打印到标准输出)
+# =============================================================================
+function show_config() {
+    # 在分享链接末尾追加标签作为锚点 (例如 #my_tag)
+    SHARE_LINK="${SHARE_LINK}#${CLIENT_CONFIG[tag]}"
+
+    # 显示客户端配置信息
+    show_client_config
+
+    # 如果存在额外配置 (XHTTP_EXTRA)，则显示它
+    # if [[ "${XHTTP_EXTRA}" ]]; then
+    #     echo -e "------------------ $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.extra") ------------------"
+    #     # 使用 jq 格式化输出额外配置的 JSON
+    #     echo "${XHTTP_EXTRA}" | jq -r '.'
+    # fi
+
+    # 显示分享链接
+    echo -e "------------------ 分享链接 ------------------"
+    echo -e "${SHARE_LINK}"
+
+    # 显示分享链接的二维码 (需要 qrencode 命令)
+    echo -e "------------------ 二维码 ------------------"
+    echo -e "${SHARE_LINK}" | qrencode -t ansiutf8
+
+    # 打印分隔线结束
+    echo -e "------------------------------------------------------"
+}
+
+# =============================================================================
+# 函数名称: share_xray_link
+# 功能描述: 生成 Xray 服务的客户端配置信息和分享链接 (如 VLESS, Trojan)。
+#           根据服务端配置 (Xray 和 Script) 自动提取必要参数，
+#           构造多种类型的分享链接 (包括 Reality, XHTTP, mKCP, TLS 等)，
+#           并可选地生成二维码。
+# 参数: 无
+# 返回值: 无 (通过 systemctl 命令执行操作)
+# =============================================================================
+function share_xray_link() {
+
+    # 缓存 Xray 和脚本配置数据
+    cache_json_data
+
+    # 获取第一个 inbound (index 1) 的通用配置
+    get_common_config 1
+
+    # 根据脚本配置中的 tag (转换为小写) 选择不同的处理分支
+    case "$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.tag | ascii_downcase')" in
+    # mkcp) get_mkcp_share_link ;;      # mKCP 模式
+    xhttp) get_xhttp_share_link ;; # XHTTP 模式
+    # trojan) get_trojan_share_link ;;  # Trojan 模式
+    # fallback) show_fallback_config ;; # Fallback 模式
+    # sni) show_sni_config ;;           # SNI 模式
+    *) get_vision_share_link ;; # 默认为 Vision 模式
+    esac
+
+    # 显示最终的配置和链接信息 (重定向到标准错误输出 >&2，虽然不太常见)
+    show_config
+
+}
+
+Xray_normal_install() {
+
+    # 将配置标签存储到 CONFIG_DATA
+    CONFIG_DATA['tag']="${XTLS_CONFIG}"
+
+    # 检查脚本配置中的规则状态，如果是 current 或 reset 则读取规则输入
+    if echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset' | grep -Eq '^(0|1)$'; then
+        exec_read 'rules'
+    fi
+
+    # 如果规则状态不是 'n'，则读取阻止选项
+    if [[ "${CONFIG_DATA['rules'],,}" != 'n' ]]; then
+        exec_read 'block-bt'
+        exec_read 'block-cn'
+        exec_read 'block-ad'
+    fi
+
+    # 读取端口
+    exec_read 'port'
+
+    # 读取 UUID
+    exec_read 'uuid'
+
+    # 读取目标域名
+    exec_read 'target'
+
+    # 读取 Short IDs
+    exec_read 'short'
+
+    case "${XTLS_CONFIG,,}" in
+    xhttp) exec_read 'path' ;; # 读取路径
+    esac
+
+    handler_script_config
+
+    handler_install
+
+    handler_x25519_config
+
+    handler_xray_config
+
+    handler_restart
+
+    share_xray_link
+
+}
+
+# ===========================================================================
+# Xray_quick_install - Xray 一键（无交互）安装
+#
+# 从 SCRIPT_CONFIG（~/.xray-script/config.json 的内存版）读取字段，校验后
+# 翻译为 CONFIG_DATA，复用 Xray_normal_install 同款 handler 管线。
+#
+# 字段规则见 docs/superpowers/specs/2026-05-11-xray-quick-install-design.md
+# ===========================================================================
+Xray_quick_install() {
+    _info "一键安装：使用 ~/.xray-script/config.json 的已有值，缺失字段自动生成"
+
+    # tag 由外部 XTLS_CONFIG 决定（install_xray_server 菜单预先选定）
+    CONFIG_DATA['tag']="${XTLS_CONFIG}"
+
+    # port: 空/0 走默认 443；非空须 1-65535
+    local q_port
+    q_port="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.port // empty')"
+    if [[ -n "${q_port}" && "${q_port}" != "0" ]]; then
+        if [[ ! "${q_port}" =~ ^[0-9]+$ || "${q_port}" -lt 1 || "${q_port}" -gt 65535 ]]; then
+            _error "xray.port 非法: ${q_port}（须为 1-65535 的整数）"
+            return 1
+        fi
+        CONFIG_DATA['port']="${q_port}"
+    fi
+
+    # uuid: 空则让 handler 走 generate_uuid 随机；非空原样传入
+    local q_uuid
+    q_uuid="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.uuid // empty')"
+    [[ -n "${q_uuid}" ]] && CONFIG_DATA['uuid']="${q_uuid}"
+
+    # target: 空则让 handler 随机选；非空须通过 domain_check
+    local q_target
+    q_target="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.target // empty')"
+    if [[ -n "${q_target}" ]]; then
+        if ! domain_check "${q_target}"; then
+            _error "xray.target 非法域名: ${q_target}"
+            return 1
+        fi
+        CONFIG_DATA['target']="${q_target}"
+    fi
+
+    # path: 仅 XHTTP 处理；空则 handler 自动生成；非空须通过 path_check
+    if [[ "${XTLS_CONFIG,,}" == "xhttp" ]]; then
+        local q_path
+        q_path="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path // empty')"
+        if [[ -n "${q_path}" ]]; then
+            if ! path_check "${q_path}"; then
+                _error "xray.path 非法: ${q_path}"
+                return 1
+            fi
+            CONFIG_DATA['path']="${q_path}"
+        fi
+    fi
+
+    # shortIds: [] / [""] / 全空串 视为未设置 → handler 用 "8 8" 生成
+    local q_sid_unset
+    q_sid_unset="$(echo "${SCRIPT_CONFIG}" | jq -r '
+        .xray.shortIds |
+        if type != "array" or length == 0 or all(. == "") then "true" else "false" end
+    ')"
+    if [[ "${q_sid_unset}" == "false" ]]; then
+        local -a q_sids=()
+        while IFS= read -r sid; do
+            q_sids+=("${sid}")
+        done < <(echo "${SCRIPT_CONFIG}" | jq -r '.xray.shortIds[]')
+        for sid in "${q_sids[@]}"; do
+            if [[ -n "${sid}" ]] && ! shortid_check "${sid}"; then
+                _error "xray.shortIds 含非法值: ${sid}"
+                return 1
+            fi
+        done
+        # handler_script_config 内部通过 IFS=' ' 重新拆分，所以这里用空格连接
+        CONFIG_DATA['short_ids']="${q_sids[*]}"
+    fi
+
+    # 路由规则开关：1→Y，其他→N
+    local q_bt q_cn q_ad
+    q_bt="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.bt')"
+    q_cn="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.cn')"
+    q_ad="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.ad')"
+    [[ "${q_bt}" == "1" ]] && CONFIG_DATA['block-bt']='Y' || CONFIG_DATA['block-bt']='N'
+    [[ "${q_cn}" == "1" ]] && CONFIG_DATA['block-cn']='Y' || CONFIG_DATA['block-cn']='N'
+    [[ "${q_ad}" == "1" ]] && CONFIG_DATA['block-ad']='Y' || CONFIG_DATA['block-ad']='N'
+
+    # rules: quick 模式固定 Y（等价 reset=1，按开关重算规则）
+    # 待 rules.reset 机制清理后可移除本行，详见 memory: project_sysset_cleanup_backlog
+    CONFIG_DATA['rules']='Y'
+
+    # 复用 normal 模式同款 handler 管线
+    handler_script_config
+    handler_install
+    handler_x25519_config
+    handler_xray_config
+    handler_restart
+
+    # 分享链接（其内部三个 read -rp 保持不变，回车即全选，与 normal 一致）
+    share_xray_link
+}
+
 install_xray_server() {
 
     if command -v xray &>/dev/null; then
@@ -2634,36 +4152,33 @@ install_xray_server() {
 
     # 检查脚本配置目录和配置文件是否存在，如果不存在则创建并下载默认配置
     if [[ ! -d "${SCRIPT_CONFIG_DIR}" && ! -f "${SCRIPT_CONFIG_PATH}" ]]; then
+
         mkdir -p "${SCRIPT_CONFIG_DIR}"
         wget -O "${SCRIPT_CONFIG_PATH}" https://raw.githubusercontent.com/faintx/public/refs/heads/main/Xconfigs/config.json
-    fi
+        mkdir -p "${SCRIPT_CONFIG_DIR}/config"
+        wget -O "${SCRIPT_CONFIG_DIR}/config/Vision.json" https://raw.githubusercontent.com/faintx/public/refs/heads/main/Xconfigs/config/Vision.json
+        wget -O "${SCRIPT_CONFIG_DIR}/config/XHTTP.json" https://raw.githubusercontent.com/faintx/public/refs/heads/main/Xconfigs/config/XHTTP.json
 
-    # 从脚本配置文件中读取已记录的安装路径
-    local script_path
-    script_path="$(jq -r '.path' "${SCRIPT_CONFIG_PATH}")"
-    # 如果配置文件中没有记录路径，且命令行也未指定，则使用默认路径
-    if [[ -z "${script_path}" && -z "${PROJECT_ROOT}" ]]; then
-        PROJECT_ROOT='/usr/local/xray-script' # 设置默认项目根目录
-        # 将默认路径更新到脚本配置文件中
-        SCRIPT_CONFIG="$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
+        SCRIPT_CONFIG="$(jq --arg path "${SCRIPT_CONFIG_DIR}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
         echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
 
-    # 如果配置文件中已有记录的路径，则使用该路径
-    elif [[ -n "${script_path}" ]]; then
-        PROJECT_ROOT="${script_path}"
+    fi
 
-    # # 如果配置文件中没有路径，但命令行指定了路径，则使用命令行指定的路径并更新配置文件
-    # elif [[ -n "${PROJECT_ROOT}" ]]; then
-    #     # 将命令行指定的路径更新到脚本配置文件中
+    # # 从脚本配置文件中读取已记录的安装路径
+    # local script_path
+    # script_path="$(jq -r '.path' "${SCRIPT_CONFIG_PATH}")"
+    # # 如果配置文件中没有记录路径，且命令行也未指定，则使用默认路径
+    # if [[ -z "${script_path}" && -z "${PROJECT_ROOT}" ]]; then
+    #     PROJECT_ROOT='/usr/local/xray-script' # 设置默认项目根目录
+    #     # 将默认路径更新到脚本配置文件中
     #     SCRIPT_CONFIG="$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
     #     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
 
-    fi
+    # # 如果配置文件中已有记录的路径，则使用该路径
+    # elif [[ -n "${script_path}" ]]; then
+    #     PROJECT_ROOT="${script_path}"
 
-    CORE_DIR="${PROJECT_ROOT}/core"
-    SERVICE_DIR="${PROJECT_ROOT}/service"
-    CONFIG_DIR="${PROJECT_ROOT}/config"
-    TOOL_DIR="${PROJECT_ROOT}/tool"
+    # fi
 
     # # 检查项目根目录是否存在
     # if [[ -d "${PROJECT_ROOT}" ]]; then
@@ -2674,9 +4189,18 @@ install_xray_server() {
     #     download_xray_script_files "${PROJECT_ROOT}"
     # fi
 
+    # 获取最新的 release 版本
+    CONFIG_DATA['version']="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')"
+
+    # 更新脚本配置中的 Xray 版本
+    # SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg xray "${CONFIG_DATA['version']}" '.xray.version = $xray')"
+    SCRIPT_CONFIG="$(jq --arg xray "${CONFIG_DATA['version']}" '.xray.version = $xray' "${SCRIPT_CONFIG_PATH}")"
+    # 将更新后的脚本配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+
     echo
     echoEnhance gray "========================================="
-    echoEnhance blue "选择 XTLS 配置类型"
+    echoEnhance blue "选择传输协议配置类型"
     echoEnhance gray "========================================="
     echoEnhance silver "1. Vision (VLESS+Vision+REALITY) (默认)"
     echoEnhance silver "2. XHTTP  (VLESS+XHTTP+REALITY)"
@@ -2686,7 +4210,7 @@ install_xray_server() {
     echoEnhance magenta "[INFO]   2.1 XHTTP 默认有多路复用，延迟比 Vision 低但多线程测速不如它"
     echoEnhance magenta "[INFO]   2.2 此外 v2rayN&G 客户端有全局 mux.cool 设置，用 XHTTP 前记得关闭，不然连不上新版 Xray 服务端"
     echoEnhance gray "========================================="
-
+    echo
     read -rp "请输入序号:" num
     case "${num}" in
     1)
@@ -2700,6 +4224,91 @@ install_xray_server() {
         ;;
     esac
 
+    if ! check_xray_config_exists "${XTLS_CONFIG}"; then
+        exit 1
+    fi
+
+    echo
+    echoEnhance gray "========================================="
+    echoEnhance blue "选择通讯协议配置类型"
+    echoEnhance gray "========================================="
+    echoEnhance silver "1. 一键快速安装 (默认, 使用 ~/.xray-script/config.json 的已有值, 缺失则自动生成)"
+    echoEnhance silver "2. 进入 Xray 配置流程 (逐项询问)"
+    echoEnhance gray "========================================="
+    echo
+    read -rp "请输入序号:" num
+    case "${num}" in
+    1)
+        Xray_quick_install
+        ;;
+    2)
+        Xray_normal_install
+        ;;
+    *)
+        Xray_quick_install
+        ;;
+    esac
+
+}
+
+purge_xray_server() {
+    # 调用 Xray-install 脚本进行卸载 (带 --purge 参数)
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
+    # 重置 xray 字段
+    SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'xray')
+    # 将重置后的脚本配置写入文件
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+}
+
+# =============================================================================
+# 函数名称: handler_start
+# 功能描述: 启动 Xray 服务。
+#           1. 检查 Xray 服务是否已在运行。
+#           2. 如果未运行则启动服务。
+#           3. 检查 Xray 服务是否已设置开机自启。
+#           4. 如果未设置则启用开机自启。
+# 参数: 无
+# 返回值: 无 (通过 systemctl 命令执行操作)
+# =============================================================================
+function handler_start() {
+    # 检查 Xray 服务是否活跃，如果不活跃则启动
+    systemctl -q is-active xray || systemctl -q start xray
+    # 检查 Xray 服务是否已启用，如果未启用则启用
+    systemctl -q is-enabled xray || systemctl -q enable xray
+}
+
+# =============================================================================
+# 函数名称: handler_stop
+# 功能描述: 停止 Xray 服务。
+#           1. 检查 Xray 服务是否正在运行。
+#           2. 如果正在运行则停止服务。
+#           3. 检查 Xray 服务是否已设置开机自启。
+#           4. 如果已设置则禁用开机自启。
+# 参数: 无
+# 返回值: 无 (通过 systemctl 命令执行操作)
+# =============================================================================
+function handler_stop() {
+    # 检查 Xray 服务是否活跃，如果活跃则停止
+    systemctl -q is-active xray && systemctl -q stop xray
+    # 检查 Xray 服务是否已启用，如果启用则禁用
+    systemctl -q is-enabled xray && systemctl -q disable xray
+}
+
+# =============================================================================
+# 函数名称: handler_restart
+# 功能描述: 重启 Xray 服务。
+#           1. 检查 Xray 服务是否正在运行。
+#           2. 如果正在运行则重启服务，否则启动服务。
+#           3. 检查 Xray 服务是否已设置开机自启。
+#           4. 如果未设置则启用开机自启。
+# 参数: 无
+# 返回值: 无 (通过 systemctl 命令执行操作)
+# =============================================================================
+function handler_restart() {
+    # 检查 Xray 服务是否活跃，如果活跃则重启，否则启动
+    systemctl -q is-active xray && systemctl -q restart xray || systemctl -q start xray
+    # 检查 Xray 服务是否已启用，如果未启用则启用
+    systemctl -q is-enabled xray || systemctl -q enable xray
 }
 
 update_xray_server() {
@@ -2884,12 +4493,13 @@ config_xray_server() {
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 Xray Server"
 
-        if [ -f "${XRAY_COINFIG_PATH}config.json" ]; then
-            local current_xray_version
-            current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
-            if [ -n "${current_xray_version}" ]; then
-                echoEnhance green "当前 Xray 版本：${current_xray_version}"
-            fi
+        if [ -f "${SCRIPT_CONFIG_PATH}" ]; then
+            SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")" # 存储从 config.json 读取的脚本配置
+            # local current_xray_version
+            # current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
+            # if [ -n "${current_xray_version}" ]; then
+            #     echoEnhance green "当前 Xray 版本：${current_xray_version}"
+            # fi
         fi
 
         echoEnhance gray "========================================="
@@ -2911,10 +4521,10 @@ config_xray_server() {
 
         read -rp "请输入序号:" num
 
-        if [ -d "${XRAY_COINFIG_PATH}" ]; then
-            wget -qO "${XRAY_CONFIG_MANAGER}" https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
-            chmod a+x "${XRAY_CONFIG_MANAGER}"
-        fi
+        # if [ -d "${XRAY_COINFIG_PATH}" ]; then
+        #     wget -qO "${XRAY_CONFIG_MANAGER}" https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
+        #     chmod a+x "${XRAY_CONFIG_MANAGER}"
+        # fi
 
         case "${num}" in
         1)
@@ -2924,16 +4534,16 @@ config_xray_server() {
             update_xray_server
             ;;
         3)
-            uninstall_xray_server
+            purge_xray_server
             ;;
         4)
-            _systemctl "start" "xray"
+            handler_start
             ;;
         5)
-            _systemctl "stop" "xray"
+            handler_stop
             ;;
         6)
-            _systemctl "restart" "xray"
+            handler_restart
             ;;
         7)
             edit_xray_config

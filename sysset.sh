@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="1.5.1"
+shell_version="2.0.1"
 
 declare -A osInfo
 

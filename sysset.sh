@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="2.0.1"
+shell_version="2.0.2"
 
 declare -A osInfo
 
@@ -153,6 +153,18 @@ function _fail() {
     echoEnhance red "[失败] $*"
     #printf -- "%s" "$@"
     printf "\n"
+}
+
+function _os() {
+    # 返回当前发行版 ID（debian / ubuntu / centos / ...），供 case 分支判断使用
+    # 若 osInfo 尚未初始化则兜底读取 /etc/os-release，保证独立调用也能工作
+    if [[ -z "${osInfo[ID]:-}" && -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        printf '%s' "${ID:-}"
+        return
+    fi
+    printf '%s' "${osInfo[ID]:-}"
 }
 
 function _get_os_info() {

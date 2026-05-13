@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="2.0.2"
+shell_version="2.0.3"
 
 declare -A osInfo
 
@@ -2273,309 +2273,6 @@ function select_data() {
     echo "${result_list[@]}"
 }
 
-function read_port() {
-    local prompt="${1}"
-    local cur_port="${2}"
-    until [[ ${is_port} =~ ^[Yy]$ ]]; do
-        echo "${prompt}"
-        read -rp "请输入自定义的端口(1-65535), 默认不修改: " new_port
-        if [[ "${new_port}" == "" || ${new_port} -eq ${cur_port} ]]; then
-            new_port=${cur_port}
-            _info "不修改，继续使用原端口: ${cur_port}"
-            break
-        fi
-        if ! _is_digit "${new_port}" || [[ ${new_port} -lt 1 || ${new_port} -gt 65535 ]]; then
-            prompt="输入错误, 端口范围是 1-65535 之间的数字"
-            continue
-        fi
-        read -rp "请确认端口: \"${new_port}\" [Y/n] " is_port
-        is_port=${is_port:-y}
-        prompt="${1}"
-    done
-}
-
-function read_uuid() {
-    _info '自定义输入的 uuid ，如果不是标准格式，将会使用 xray uuid -i "自定义字符串" 进行 UUIDv5 映射后填入配置'
-    read -rp "请输入自定义 UUID, 默认则自动生成: " in_uuid
-}
-
-function read_domain() {
-    until [[ ${is_domain} =~ ^[Yy]$ ]]; do
-        read -rp "请输入域名：" domain
-        check_domain=$(echo "${domain}" | grep -oE '[^/]+(\.[^/]+)+\b' | head -n 1)
-        read -rp "请确认域名: \"${check_domain}\" [Y/n] " is_domain
-        is_domain=${is_domain:-y}
-    done
-    domain_path=$(echo "${domain}" | sed -En "s|.*${check_domain}(/.*)?|\1|p")
-    domain=${check_domain}
-}
-
-function select_dest() {
-
-    local dest_list
-    # shellcheck disable=SC2207
-    dest_list=($(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p'))
-    # mapfile -t dest_list <<<"$(jq '.xray.serverNames | keys_unsorted' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '".*"' | sed -En 's|"(.*)"|\1|p')"
-
-    local cur_dest
-    cur_dest=$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json")
-
-    local pick_dest=""
-    local all_sns=""
-    local sns=""
-    local is_dest=""
-
-    local prompt="请选择你的 dest, 当前默认使用 \"${cur_dest}\", 自填选 0: "
-    until [[ ${is_dest} =~ ^[Yy]$ ]]; do
-
-        echo -e "---------------- dest 列表 -----------------"
-        _print_list "${dest_list[@]}"
-
-        read -rp "${prompt}" pick
-        if [[ "${pick}" == "" && "${cur_dest}" != "" ]]; then
-            pick_dest=${cur_dest}
-            break
-        fi
-
-        if ! _is_digit "${pick}" || [[ "${pick}" -lt 0 || "${pick}" -gt ${#dest_list[@]} ]]; then
-            prompt="输入错误, 请输入 0-${#dest_list[@]} 之间的数字: "
-            continue
-        fi
-
-        if [[ "${pick}" == "0" ]]; then
-
-            _warn "如果输入列表中已有域名将会导致 serverNames 被修改"
-            _warn "使用自填域名时，请确保该域名在国内的连通性"
-            read_domain
-
-            _info "正在检查 \"${domain}\" 是否支持 TLSv1.3 与 h2"
-            if ! _is_tlsv1_3_h2 "${domain}"; then
-                _warn "\"${domain}\" 不支持 TLSv1.3 或 h2 ，亦或者 Client Hello 不是 X25519"
-                continue
-            fi
-            _info "\"${domain}\" 支持 TLSv1.3 与 h2"
-
-            _info "正在获取 Allowed domains"
-            pick_dest=${domain}
-            all_sns=$(xray tls ping "${pick_dest}" | sed -n '/with SNI/,$p' | sed -En 's/\[(.*)\]/\1/p' | sed -En 's/Allowed domains:\s*//p' | jq -R -c 'split(" ")' | jq --arg sni "${pick_dest}" '. += [$sni]')
-            sns=$(echo "${all_sns}" | jq 'map(select(test("^[^*]+$"; "g")))' | jq -c 'map(select(test("^((?!cloudflare|akamaized|edgekey|edgesuite|cloudfront|azureedge|msecnd|edgecastcdn|fastly|googleusercontent|kxcdn|maxcdn|stackpathdns|stackpathcdn).)*$"; "ig")))')
-
-            _info "过滤通配符前的 SNI"
-            _print_list "$(echo "${all_sns}" | jq -r '.[]')"
-
-            _info "过滤通配符后的 SNI"
-            _print_list "$(echo "${sns}" | jq -r '.[]')"
-
-            read -rp "请选择要使用的 serverName ，用英文逗号分隔， 默认全选: " pick_num
-            sns=$(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"$(echo "${sns}" | jq -r -c '.[]')")" "${pick_num}" | jq -R -c 'split(" ")')
-
-            _info "如果有更多的 serverNames 请在 ${XRAY_COINFIG_PATH}config.json 中自行编辑"
-        else
-            pick_dest="${dest_list[${pick} - 1]}"
-        fi
-
-        read -rp "是否使用 dest: \"${pick_dest}\" [Y/n] " is_dest
-        is_dest=${is_dest:-y}
-        prompt="请选择你的 dest, 当前默认使用 \"${cur_dest}\", 自填选 0: "
-        echo -e "-------------------------------------------"
-
-    done
-
-    _info "正在修改配置"
-    [[ "${domain_path}" != "" ]] && pick_dest="${pick_dest}${domain_path}"
-    if echo "${pick_dest}" | grep -q '/$'; then
-        pick_dest=$(echo "${pick_dest}" | sed -En 's|/+$||p')
-    fi
-    [[ "${sns}" != "" ]] && jq --argjson sn "{\"${pick_dest}\": ${sns}}" '.xray.serverNames += $sn' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-    jq --arg dest "${pick_dest}" '.xray.dest = $dest' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-
-}
-
-install_update_xray() {
-
-    _info "正在安装或更新 Xray ..."
-
-    # 官方安装脚本安装 Xray
-    # _error_detect "bash -c \"$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)\" @ install -u root"
-    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root
-
-    # 更新 Xray 版本号
-    jq --arg ver "$(xray version | head -n 1 | cut -d \( -f 1 | grep -Eoi '[0-9.]*')" '.xray.version = $ver' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-
-    # 更新 geoip geosite
-    wget -O "${XRAY_COINFIG_PATH}update-dat.sh" https://raw.githubusercontent.com/faintx/public/main/tools/update-dat.sh
-    chmod a+x "${XRAY_COINFIG_PATH}update-dat.sh"
-
-    # 更新定时任务
-    (
-        crontab -l 2>/dev/null
-        echo "30 05 * * * ${XRAY_COINFIG_PATH}update-dat.sh >/dev/null 2>&1"
-    ) | awk '!x[$0]++' | crontab -
-
-    _info "获取 geoip geosite 数据 ..."
-    "${XRAY_COINFIG_PATH}update-dat.sh"
-
-}
-
-function config_xray() {
-
-    _info "正在配置 xray config.json"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" --download
-
-    local xray_x25519
-    xray_x25519=$(xray x25519)
-
-    local xs_private_key
-    xs_private_key=$(echo "${xray_x25519}" | head -1 | awk '{print $3}')
-
-    local xs_public_key
-    xs_public_key=$(echo "${xray_x25519}" | tail -n 1 | awk '{print $3}')
-
-    # Xray-script config.json
-    jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-    jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-
-    # Xray-core config.json
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -p "${new_port}"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -u "${in_uuid}"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -d "$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' "${XRAY_COINFIG_PATH}config.json" | tr '\n' ',')"
-    "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -x "${xs_private_key}"
-    # "${XRAY_CONFIG_MANAGER}" --path "${HOME}/config.json" -rsid
-
-    mv -f "${HOME}/config.json" "${XRAY_SERVER_PATH}config.json"
-
-    _systemctl "restart" "xray"
-
-}
-
-function show_share_link() {
-
-    local sl=""
-    # share lnk contents
-    local sl_host
-    sl_host=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
-    local sl_inbound
-    sl_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' "${XRAY_SERVER_PATH}config.json")
-    local sl_port
-    sl_port=$(echo "${sl_inbound}" | jq -r '.port')
-    local sl_protocol
-    sl_protocol=$(echo "${sl_inbound}" | jq -r '.protocol')
-    local sl_ids
-    sl_ids=$(echo "${sl_inbound}" | jq -r '.settings.clients[] | .id')
-    local sl_public_key
-    sl_public_key=$(jq -r '.xray.publicKey' "${XRAY_COINFIG_PATH}config.json")
-
-    local sl_serverNames
-    sl_serverNames=$(echo "${sl_inbound}" | jq -r '.streamSettings.realitySettings.serverNames[]')
-
-    local sl_shortIds
-    sl_shortIds=$(echo "${sl_inbound}" | jq '.streamSettings.realitySettings.shortIds[]')
-
-    # share link fields
-    local sl_uuid=""
-    local sl_security='security=reality'
-    local sl_flow='flow=xtls-rprx-vision'
-    local sl_fingerprint='fp=chrome'
-    local sl_publicKey="pbk=${sl_public_key}"
-    local sl_sni=""
-    local sl_shortId=""
-    local sl_spiderX='spx=%2F'
-    local sl_descriptive_text='VLESS-XTLS-uTLS-REALITY'
-
-    # select show
-    _print_list "${sl_ids[@]}"
-    read -rp "请选择生成分享链接的 UUID ，用英文逗号分隔， 默认全选: " pick_num
-    # shellcheck disable=SC2207
-    sl_id=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_ids[@]}")" "${pick_num}"))
-
-    _print_list "${sl_serverNames[@]}"
-    read -rp "请选择生成分享链接的 serverName ，用英文逗号分隔， 默认全选: " pick_num
-    # shellcheck disable=SC2207
-    sl_serverNames=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_serverNames[@]}")" "${pick_num}"))
-
-    _print_list "${sl_shortIds[@]}"
-    read -rp "请选择生成分享链接的 shortId ，用英文逗号分隔， 默认全选: " pick_num
-    # shellcheck disable=SC2207
-    sl_shortIds=($(select_data "$(awk 'BEGIN{ORS=","} {print}' <<<"${sl_shortIds[@]}")" "${pick_num}"))
-
-    echo -e "--------------- share link ---------------"
-    for sl_id in "${sl_ids[@]}"; do
-        sl_uuid="${sl_id}"
-        for sl_serverName in "${sl_serverNames[@]}"; do
-            sl_sni="sni=${sl_serverName}"
-            echo -e "---------- serverName ${sl_sni} ----------"
-            for sl_shortId in "${sl_shortIds[@]}"; do
-                [[ "${sl_shortId//\"/}" != "" ]] && sl_shortId="sid=${sl_shortId//\"/}" || sl_shortId=""
-                sl="${sl_protocol}://${sl_uuid}@${sl_host}:${sl_port}?${sl_security}&${sl_flow}&${sl_fingerprint}&${sl_publicKey}&${sl_sni}&${sl_spiderX}&${sl_shortId}"
-                echo "${sl%&}#${sl_descriptive_text}"
-            done
-            echo -e "------------------------------------------------"
-        done
-    done
-    echo -e "------------------------------------------"
-    echo -e "${RED}此脚本仅供交流学习使用，请勿使用此脚本行违法之事。${NC}"
-    echo -e "${RED}网络非法外之地，行非法之事，必将接受法律制裁。${NC}"
-    echo -e "------------------------------------------"
-}
-
-function show_xray_config() {
-
-    local IPv4
-    IPv4=$(wget -qO- -t1 -T2 ipv4.icanhazip.com)
-
-    local xs_inbound
-    xs_inbound=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality")' "${XRAY_SERVER_PATH}config.json")
-
-    local xs_port
-    xs_port=$(echo "${xs_inbound}" | jq '.port')
-
-    local xs_protocol
-    xs_protocol=$(echo "${xs_inbound}" | jq '.protocol')
-
-    local xs_ids
-    xs_ids=$(echo "${xs_inbound}" | jq '.settings.clients[] | .id' | tr '\n' ',')
-
-    local xs_public_key
-    xs_public_key=$(jq '.xray.publicKey' "${XRAY_COINFIG_PATH}config.json")
-
-    local xs_serverNames
-    xs_serverNames=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.serverNames[]' | tr '\n' ',')
-
-    local xs_shortIds
-    xs_shortIds=$(echo "${xs_inbound}" | jq '.streamSettings.realitySettings.shortIds[]' | tr '\n' ',')
-
-    local xs_spiderX
-    xs_spiderX=$(jq '.xray.dest' "${XRAY_COINFIG_PATH}config.json")
-
-    [[ "${xs_spiderX}" == "${xs_spiderX##*/}" ]] && xs_spiderX='"/"' || xs_spiderX="\"/${xs_spiderX#*/}"
-    echo -e "-------------- client config --------------"
-    echo -e "address     : \"${IPv4}\""
-    echo -e "port        : ${xs_port}"
-    echo -e "protocol    : ${xs_protocol}"
-    echo -e "id          : ${xs_ids%,}"
-    echo -e "flow        : \"xtls-rprx-vision\""
-    echo -e "network     : \"raw\""
-    echo -e "TLS         : \"reality\""
-    echo -e "SNI         : ${xs_serverNames%,}"
-    echo -e "Fingerprint : \"chrome\""
-    echo -e "PublicKey   : ${xs_public_key}"
-    echo -e "ShortId     : ${xs_shortIds%,}"
-    echo -e "SpiderX     : ${xs_spiderX}"
-    echo -e "------------------------------------------"
-    read -rp "是否生成分享链接[Y/n]: " is_show_share_link
-    echo
-    is_show_share_link=${is_show_share_link:-Y}
-    if [[ ${is_show_share_link} =~ ^[Yy]$ ]]; then
-        show_share_link
-    else
-        echo -e "------------------------------------------"
-        echo -e "${RED}此脚本仅供交流学习使用，请勿使用此脚本行违法之事。${NC}"
-        echo -e "${RED}网络非法外之地，行非法之事，必将接受法律制裁。${NC}"
-        echo -e "------------------------------------------"
-    fi
-}
-
 check_xray_dependencies() {
     # 定义基础必需的软件包列表
     local packages=("openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode")
@@ -2932,10 +2629,6 @@ function read_input() {
         read -rp "${msg}" read_result
 
         case "${opt}" in
-        rules)
-            # 为规则选项设置默认值 'N'
-            return_result="${return_result:-N}"
-            ;;
         block-bt | block-cn | block-ad)
             # 归一化，空输入按 Y
             ans="${read_result:-Y}"
@@ -3017,9 +2710,6 @@ function exec_read() {
     local read_result
 
     case "${opt}" in
-    rules)
-        CONFIG_DATA['rules']=$(read_input "是否重置路由规则 [y/N] :" "rules")
-        ;;
     block-bt)
         CONFIG_DATA['block-bt']=$(read_input "是否开启 bittorrent 屏蔽? [Y/n] :" "block-bt")
         ;;
@@ -3377,8 +3067,6 @@ function handler_script_config() {
     # 从 CONFIG_DATA 或生成器获取配置值
     # 获取配置标签
     local CONFIG_TAG="${1:-${CONFIG_DATA['tag']}}"
-    # 获取规则状态
-    local XRAY_RULES_STATUS="${CONFIG_DATA['rules']}"
     # 获取 block bt 状态
     local XRAY_RULES_BT="${CONFIG_DATA['block-bt']}"
     # 获取 block cn 状态
@@ -3415,8 +3103,6 @@ function handler_script_config() {
     # 获取 CA 邮箱
     # local CA_EMAIL="${CONFIG_DATA['email']}"
 
-    # 更新脚本配置中的规则状态
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg reset "${XRAY_RULES_STATUS,,}" ' if $reset != "n" then .xray.rules.reset = 1 else .xray.rules.reset = 0 end ')"
     # 更新脚本配置中的 block bt 状态
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg bt "${XRAY_RULES_BT,,}" ' if $bt != "n" then .xray.rules.bt = 1 else .xray.rules.bt = 0 end ')"
     # 更新脚本配置中的 block cn 状态
@@ -3474,6 +3160,8 @@ function handler_script_config() {
     # 更新配置标签和端口
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg tag "${CONFIG_TAG}" '.xray.tag = $tag')"
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson port "${XRAY_PORT}" '.xray.port = $port')"
+    # 迁移清理：彻底移除老版本遗留的规则重置子字段
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq 'del(.xray.rules.reset)')"
     # 将更新后的脚本配置写入文件
     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
 }
@@ -3703,16 +3391,12 @@ function handler_xray_config() {
     SHORT_IDS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.shortIds')" # 获取 Short IDs
     local XHTTP_PATH
     XHTTP_PATH="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path')" # 获取路径
-    local XRAY_RULES_STATUS
-    XRAY_RULES_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset')" # 获取规则状态
     local XRAY_RULES_BT
-    XRAY_RULES_BT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.bt')" # 获取 bt 规则状态
+    XRAY_RULES_BT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.bt // 0')" # 获取 bt 规则状态
     local XRAY_RULES_CN
-    XRAY_RULES_CN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.cn')" # 获取 cn 规则状态
+    XRAY_RULES_CN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.cn // 0')" # 获取 cn 规则状态
     local XRAY_RULES_AD
-    XRAY_RULES_AD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.ip')" # 获取 ad 规则状态
-    local XRAY_RULES
-    XRAY_RULES="$(echo "${SCRIPT_CONFIG}" | jq -r '.rules')" # 获取路由规则
+    XRAY_RULES_AD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.ad // 0')" # 获取 ad 规则状态
     local WARP_STATUS
     WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp')" # 获取 WARP 状态
 
@@ -3762,19 +3446,10 @@ function handler_xray_config() {
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.inbounds[2].streamSettings.xhttpSettings.path = $path')"
         ;;
     esac
-    # 处理路由规则
-    case "${XRAY_RULES_STATUS}" in
-    0)
-        # 保留当前路由规则
-        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.routing.rules = $rules')"
-        ;;
-    1)
-        # 重置并添加默认路由规则
+    # 路由规则：恒按 bt/cn/ad 三开关重新生成（规则重置机制已拆除）
         [[ "${XRAY_RULES_BT}" -eq 1 ]] && add_rule "bt" "protocol" "bittorrent" "block" 1
         [[ "${XRAY_RULES_CN}" -eq 1 ]] && add_rule "cn-ip" "ip" "geoip:cn" "block" "after" "private-ip"
         [[ "${XRAY_RULES_AD}" -eq 1 ]] && add_rule "ad-domain" "domain" "geosite:category-ads-all" "block"
-        ;;
-    esac
     # 处理 WARP 状态
     if [[ ${WARP_STATUS} -eq 1 ]]; then
         # 获取 WARP 容器 IP
@@ -3785,10 +3460,6 @@ function handler_xray_config() {
         # 将 WARP 出站配置添加到 Xray 配置中
         XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq --argjson socks_config "${socks_config}" '.outbounds += $socks_config')
     fi
-    # 获取更新后的路由规则
-    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
-    # 更新脚本配置中的路由规则
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
     # 将更新后的脚本配置和 Xray 配置写入文件
     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
     echo "${XRAY_CONFIG}" >"${XRAY_CONFIG_PATH}" && sleep 2
@@ -3999,22 +3670,34 @@ function share_xray_link() {
 
 }
 
+# =============================================================================
+# 函数名称: show_xray_config
+# 功能描述: 打印当前客户端配置信息、分享链接与二维码。
+#           复用新管线的 cache_json_data / get_common_config / share_xray_link 逻辑。
+# 参数: 无
+# 返回值: 无（直接输出到 stdout）
+# =============================================================================
+function show_xray_config() {
+    if ! command -v xray &>/dev/null; then
+        _warn "Xray 未安装，无法展示配置"
+        return 1
+    fi
+    if [[ ! -f "${SCRIPT_CONFIG_PATH}" || ! -f "${XRAY_CONFIG_PATH}" ]]; then
+        _warn "脚本配置或 Xray 配置不存在，请先执行安装"
+        return 1
+    fi
+    share_xray_link
+}
+
 Xray_normal_install() {
 
     # 将配置标签存储到 CONFIG_DATA
     CONFIG_DATA['tag']="${XTLS_CONFIG}"
 
-    # 检查脚本配置中的规则状态，如果是 current 或 reset 则读取规则输入
-    if echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset' | grep -Eq '^(0|1)$'; then
-        exec_read 'rules'
-    fi
-
-    # 如果规则状态不是 'n'，则读取阻止选项
-    if [[ "${CONFIG_DATA['rules'],,}" != 'n' ]]; then
+    # 路由规则开关：固定按 bt/cn/ad 三开关重新生成（规则重置机制已拆除）
         exec_read 'block-bt'
         exec_read 'block-cn'
         exec_read 'block-ad'
-    fi
 
     # 读取端口
     exec_read 'port'
@@ -4129,10 +3812,6 @@ Xray_quick_install() {
     [[ "${q_bt}" == "1" ]] && CONFIG_DATA['block-bt']='Y' || CONFIG_DATA['block-bt']='N'
     [[ "${q_cn}" == "1" ]] && CONFIG_DATA['block-cn']='Y' || CONFIG_DATA['block-cn']='N'
     [[ "${q_ad}" == "1" ]] && CONFIG_DATA['block-ad']='Y' || CONFIG_DATA['block-ad']='N'
-
-    # rules: quick 模式固定 Y（等价 reset=1，按开关重算规则）
-    # 待 rules.reset 机制清理后可移除本行，详见 memory: project_sysset_cleanup_backlog
-    CONFIG_DATA['rules']='Y'
 
     # 复用 normal 模式同款 handler 管线
     handler_script_config
@@ -4264,12 +3943,62 @@ install_xray_server() {
 }
 
 purge_xray_server() {
-    # 调用 Xray-install 脚本进行卸载 (带 --purge 参数)
+    if ! command -v xray &>/dev/null && [[ ! -d "${SCRIPT_CONFIG_DIR}" && ! -d "${XRAY_SERVER_PATH}" && ! -d "${XRAY_COINFIG_PATH}" ]]; then
+        _warn "Xray 未安装，无需卸载"
+        return 0
+    fi
+
+    read -rp "确认卸载 Xray 并清空脚本配置？[y/N] " yn
+    yn="${yn:-N}"
+    [[ ! "${yn}" =~ ^[Yy]$ ]] && { _info "已取消"; return 0; }
+
+    _info "正在卸载 Xray"
+
+    # 移除老版本 update-dat.sh 的 crontab 条目（存量用户兼容）
+    if command -v crontab &>/dev/null; then
+        crontab -l 2>/dev/null | grep -v "/usr/local/etc/xray-script/update-dat.sh >/dev/null 2>&1" | crontab - 2>/dev/null || true
+    fi
+
+    # 停服 & 禁用
+    if command -v systemctl &>/dev/null; then
+        systemctl -q is-active xray && systemctl -q stop xray
+        systemctl -q is-enabled xray && systemctl -q disable xray
+    fi
+
+    # 官方脚本卸载（带 --purge 清理配置与日志）
     bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
-    # 重置 xray 字段
-    SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'xray')
-    # 将重置后的脚本配置写入文件
-    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
+
+    # 兜底清理残留目录（官方脚本偶尔漏网）
+    rm -rf /etc/systemd/system/xray.service /etc/systemd/system/xray@.service
+    rm -rf /usr/local/bin/xray /usr/local/etc/xray /usr/local/share/xray /var/log/xray
+
+    # 还原存量用户的 sysctl 备份（老路径），再清理老脚本目录
+    if [[ -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" ]]; then
+        mv -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" /etc/sysctl.conf && _info "已还原网络连接设置"
+    fi
+    rm -rf "${XRAY_COINFIG_PATH}"
+
+    # 存量用户可能装过 cloudflare-warp docker，同步清理（与老卸载语义对齐）
+    if command -v docker &>/dev/null; then
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'cloudflare-warp'; then
+            _info '正在停止并移除 cloudflare-warp 容器'
+            docker container stop cloudflare-warp >/dev/null 2>&1 || true
+            docker container rm cloudflare-warp >/dev/null 2>&1 || true
+        fi
+        if docker images --format '{{.Repository}}' 2>/dev/null | grep -qx 'e7h4n/cloudflare-warp'; then
+            _info '正在卸载 cloudflare-warp 镜像'
+            docker image rm e7h4n/cloudflare-warp >/dev/null 2>&1 || true
+        fi
+    fi
+
+    # 清理脚本侧配置（本脚本创建的）
+    rm -rf "${SCRIPT_CONFIG_DIR}"
+
+    # 内存侧清零
+    SCRIPT_CONFIG=""
+    XRAY_CONFIG=""
+
+    _info "Xray 已卸载完毕"
 }
 
 # =============================================================================
@@ -4324,83 +4053,101 @@ function handler_restart() {
 }
 
 update_xray_server() {
+    if ! command -v xray &>/dev/null; then
+        _warn "Xray 未安装，无法更新。请先执行菜单 1 进行安装。"
+        return 1
+    fi
+    if [[ ! -f "${SCRIPT_CONFIG_PATH}" ]]; then
+        _warn "脚本配置不存在：${SCRIPT_CONFIG_PATH}"
+        return 1
+    fi
 
-    _info "判断 Xray 是否用新版本"
+    _info "检查 Xray 版本更新"
 
+    # 当前版本：优先从脚本配置读，兜底用 xray --version
+    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
     local current_xray_version
-    current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
+    current_xray_version="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.version // empty')"
+    if [[ -z "${current_xray_version}" ]]; then
+        current_xray_version="$(xray --version 2>/dev/null | head -n 1 | awk '{print $2}')"
+    fi
 
+    # 最新版本：GitHub Releases API
     local latest_xray_version
-    latest_xray_version="$(wget -qO- --no-check-certificate https://api.github.com/repos/XTLS/Xray-core/releases | jq -r '.[0].tag_name ' | cut -d v -f 2)"
-
-    # if _version_ge "${latest_xray_version}" "${current_xray_version}"; then
-    if [ "${latest_xray_version}" != "${current_xray_version}" ]; then
-        _info "检测到有新版可用"
-        install_update_xray
-    else
-        _info "当前已是最新版本: ${current_xray_version}"
+    latest_xray_version="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name // empty')"
+    if [[ -z "${latest_xray_version}" ]]; then
+        _warn "获取最新 Xray 版本失败，请检查网络"
+        return 1
     fi
 
-}
+    # 规范化为无前缀 v 的纯版本号用于比较（xray --version 无 v，GitHub tag 多为 v 前缀）
+    local current_norm="${current_xray_version#v}"
+    local latest_norm="${latest_xray_version#v}"
 
-function purge_xray() {
+    _info "当前版本：${current_norm:-未知}"
+    _info "最新版本：${latest_norm}"
 
-    _info "正在卸载 Xray"
-
-    crontab -l | grep -v "/usr/local/etc/xray-script/update-dat.sh >/dev/null 2>&1" | crontab -
-
-    _systemctl "stop" "xray"
-    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
-
-    rm -rf /etc/systemd/system/xray.service
-    rm -rf /etc/systemd/system/xray@.service
-    rm -rf /usr/local/bin/xray
-    rm -rf /usr/local/etc/xray
-    rm -rf /usr/local/share/xray
-    rm -rf /var/log/xray
-
-}
-
-uninstall_xray_server() {
-
-    purge_xray
-
-    [[ -f ${XRAY_COINFIG_PATH}sysctl.conf.bak ]] && mv -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" /etc/sysctl.conf && _info "已还原网络连接设置"
-    rm -rf "${XRAY_COINFIG_PATH}"
-
-    if docker ps | grep -q cloudflare-warp; then
-        _info '正在停止 cloudflare-warp'
-        docker container stop cloudflare-warp
-        docker container rm cloudflare-warp
+    if [[ -n "${current_norm}" && "${current_norm}" == "${latest_norm}" ]]; then
+        _info "已是最新版本，无需更新"
+        return 0
     fi
 
-    if docker images | grep -q e7h4n/cloudflare-warp; then
-        _info '正在卸载 cloudflare-warp'
-        docker image rm e7h4n/cloudflare-warp
-    fi
+    read -rp "检测到新版本，是否更新？[Y/n] " yn
+    yn="${yn:-Y}"
+    [[ ! "${yn}" =~ ^[Yy]$ ]] && { _info "已取消"; return 0; }
 
-    # rm -rf "${HOME}"/.warp
-    # _info 'Docker 请自行卸载'
+    # 复用官方安装脚本完成原地升级
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root
 
-    _info "Xray-REALITY Server 已经完成卸载."
+    # 回写脚本配置的版本号（统一存无 v 前缀形式，与 xray --version 保持一致）
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg ver "${latest_norm}" '.xray.version = $ver')"
+    echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
 
+    # 重启服务生效
+    handler_restart
+    _info "Xray 已更新至 ${latest_norm}"
 }
 
+# =============================================================================
+# 函数名称: _edit_require_installed
+# 功能描述: edit_xray_config 内部守卫；未安装 / 配置缺失时打印警告并返回 1。
+# =============================================================================
+function _edit_require_installed() {
+    if ! command -v xray &>/dev/null; then
+        _warn "Xray 未安装，请先执行菜单 1"
+        return 1
+    fi
+    if [[ ! -f "${SCRIPT_CONFIG_PATH}" || ! -f "${XRAY_CONFIG_PATH}" ]]; then
+        _warn "配置文件缺失，请先完成一次安装"
+        return 1
+    fi
+    # 同步缓存
+    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
+    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
+    return 0
+}
+
+# =============================================================================
+# 函数名称: edit_xray_config
+# 功能描述: Xray 配置的增量修改菜单。所有操作落盘到 SCRIPT_CONFIG_PATH，
+#           并通过 handler_xray_config 重新渲染 XRAY_CONFIG_PATH，
+#           再由 handler_restart 生效。
+# =============================================================================
 edit_xray_config() {
-
     while true; do
         [[ true = "${is_close}" ]] && break
         echo
         echoEnhance gray "========================================="
-        echoEnhance blue "Xray-REALITY Server 修改配置"
+        echoEnhance blue "修改 Xray 配置"
         echoEnhance gray "========================================="
-        echoEnhance silver "1. 修改 uuid"
-        echoEnhance silver "2. 修改 target"
-        echoEnhance silver "3. 修改 x25519 key"
-        echoEnhance silver "4. 修改 shortIds"
-        echoEnhance silver "5. 修改 xray 监听端口"
-        echoEnhance silver "6. 刷新已有的 shortIds (重新自动生成新的)"
+        echoEnhance silver "1. 修改 UUID"
+        echoEnhance silver "2. 修改 target（目标域名，自动刷新 serverNames）"
+        echoEnhance silver "3. 刷新 x25519 密钥对"
+        echoEnhance silver "4. 覆盖 shortIds（用户输入，逗号分隔）"
+        echoEnhance silver "5. 修改监听端口"
+        echoEnhance silver "6. 重新随机生成 shortIds"
         echoEnhance silver "7. 追加自定义 shortIds"
+        echoEnhance silver "8. 修改路由规则（BT/CN/广告开关）"
         echoEnhance gray "———————————————————————————————————"
         echoEnhance cyan "0. 返回上级菜单"
         echoEnhance gray "========================================="
@@ -4408,81 +4155,107 @@ edit_xray_config() {
         read -rp "请输入序号:" num
         case "${num}" in
         1)
-            read_uuid
-            _info "正在修改用户 id"
-            "${XRAY_CONFIG_MANAGER}" -u "${in_uuid}"
-            _info "已成功修改用户 id"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            # 清理临时态避免污染
+            unset 'CONFIG_DATA[uuid]'
+            exec_read 'uuid'
+            local new_uuid
+            new_uuid="$(generate_uuid "${CONFIG_DATA['uuid']}")"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${new_uuid}" '.xray.uuid = $uuid')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         2)
-            _info "正在修改 target 与 serverNames"
-            select_dest
-            "${XRAY_CONFIG_MANAGER}" -d "$(jq -r '.xray.dest' "${XRAY_COINFIG_PATH}config.json" | grep -Eoi '([a-zA-Z0-9](\-?[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}')"
-            "${XRAY_CONFIG_MANAGER}" -sn "$(jq -c -r '.xray | .serverNames[.dest] | .[]' "${XRAY_COINFIG_PATH}config.json" | tr '\n' ',')"
-            _info "已成功修改 dest 与 serverNames"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            unset 'CONFIG_DATA[target]'
+            exec_read 'target'
+            local new_target="${CONFIG_DATA['target']:-$(generate_target)}"
+            local new_server_names
+            new_server_names="$(generate_server_names "${new_target}")"
+            # 注意：generate_server_names 已经落盘 .target 变更；这里再把 xray.target/serverNames 覆盖
+            SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg t "${new_target}" '.xray.target = $t')"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson sn "${new_server_names}" '.xray.serverNames = $sn')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         3)
-            _info "正在修改 x25519 key"
-
-            local xray_x25519
-            xray_x25519=$(xray x25519)
-
-            local xs_private_key
-            xs_private_key=$(echo "${xray_x25519}" | head -1 | awk '{print $3}')
-
-            local xs_public_key
-            xs_public_key=$(echo "${xray_x25519}" | tail -n 1 | awk '{print $3}')
-
-            # Xray-script config.json
-            jq --arg privateKey "${xs_private_key}" '.xray.privateKey = $privateKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-            jq --arg publicKey "${xs_public_key}" '.xray.publicKey = $publicKey' "${XRAY_COINFIG_PATH}config.json" >"${XRAY_COINFIG_PATH}new.json" && mv -f "${XRAY_COINFIG_PATH}new.json" "${XRAY_COINFIG_PATH}config.json"
-
-            # Xray-core config.json
-            "${XRAY_CONFIG_MANAGER}" -x "${xs_private_key}"
-            _info "已成功修改 x25519 key"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            handler_x25519_config
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         4)
-            _info "shortId 值定义: 接受一个十六进制数值 ，长度为 2 的倍数，长度上限为 16"
-            _info "shortId 列表默认为值为[\"\"]，若有此项，客户端 shortId 可为空"
-            read -rp "请输入自定义 shortIds 值，多个值以英文逗号进行分隔: " sid_str
-            _info "正在修改 shortIds"
-            "${XRAY_CONFIG_MANAGER}" -sid "${sid_str}"
-            _info "已成功修改 shortIds"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            unset 'CONFIG_DATA[short_ids]'
+            exec_read 'short'
+            # exec_read/short 会直接写 CONFIG_DATA['short_ids']
+            local new_short_ids
+            new_short_ids="$(generate_short_ids "${CONFIG_DATA['short_ids']:-8 8}")"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson sid "${new_short_ids}" '.xray.shortIds = $sid')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         5)
-            local xs_port
-            xs_port=$(jq '.inbounds[] | select(.tag == "xray-script-xtls-reality") | .port' "${XRAY_COINFIG_PATH}config.json")
-            read_port "当前 xray 监听端口为: ${xs_port}" "${xs_port}"
-            if [[ "${new_port}" && ${new_port} -ne ${xs_port} ]]; then
-                "${XRAY_CONFIG_MANAGER}" -p "${new_port}"
-                _info "当前 xray 监听端口已修改为: ${new_port}"
-                _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            unset 'CONFIG_DATA[port]'
+            exec_read 'port'
+            local new_port="${CONFIG_DATA['port']:-443}"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson p "${new_port}" '.xray.port = $p')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
                 show_xray_config
-            fi
             ;;
         6)
-            _info "正在修改 shortIds"
-            "${XRAY_CONFIG_MANAGER}" -rsid
-            _info "已成功修改 shortIds"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            local new_short_ids
+            new_short_ids="$(generate_short_ids "8 8")"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson sid "${new_short_ids}" '.xray.shortIds = $sid')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         7)
-            until [ ${#sid_str} -gt 0 ] && [ ${#sid_str} -le 16 ] && [ $((${#sid_str} % 2)) -eq 0 ]; do
-                _info "shortId 值定义: 接受一个十六进制数值 ，长度为 2 的倍数，长度上限为 16"
-                read -rp "请输入自定义 shortIds 值，不能为空，多个值以英文逗号进行分隔: " sid_str
-            done
-            _info "正在添加自定义 shortIds"
-            "${XRAY_CONFIG_MANAGER}" -asid "${sid_str}"
-            _info "已成功添加自定义 shortIds"
-            _systemctl "restart" "xray"
+            _edit_require_installed || continue
+            unset 'CONFIG_DATA[short_ids]'
+            exec_read 'short'
+            # 把新追加的合并到当前 .xray.shortIds
+            local appended merged
+            appended="$(generate_short_ids "${CONFIG_DATA['short_ids']:-}")"
+            merged="$(echo "${SCRIPT_CONFIG}" | jq --argjson add "${appended}" '.xray.shortIds = ((.xray.shortIds // []) + $add) | unique | sort_by(length)')"
+            SCRIPT_CONFIG="${merged}"
+            # 上一行是赋值整行，merged 是已经计算好的整个 JSON；下面落盘并从中读回 .xray.shortIds 保证管线一致
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq '.')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
+            show_xray_config
+            ;;
+        8)
+            _edit_require_installed || continue
+            unset 'CONFIG_DATA[block-bt]' 'CONFIG_DATA[block-cn]' 'CONFIG_DATA[block-ad]'
+            exec_read 'block-bt'
+            exec_read 'block-cn'
+            exec_read 'block-ad'
+            local _bt _cn _ad
+            [[ "${CONFIG_DATA['block-bt'],,}" != 'n' ]] && _bt=1 || _bt=0
+            [[ "${CONFIG_DATA['block-cn'],,}" != 'n' ]] && _cn=1 || _cn=0
+            [[ "${CONFIG_DATA['block-ad'],,}" != 'n' ]] && _ad=1 || _ad=0
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson v "${_bt}" '.xray.rules.bt = $v')"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson v "${_cn}" '.xray.rules.cn = $v')"
+            SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson v "${_ad}" '.xray.rules.ad = $v')"
+            echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 1
+            handler_xray_config
+            handler_restart
             show_xray_config
             ;;
         0)
@@ -4493,7 +4266,6 @@ edit_xray_config() {
             ;;
         esac
     done
-
 }
 
 # 3. 配置管理 Xray-REALITY Server
@@ -4505,13 +4277,20 @@ config_xray_server() {
         echoEnhance gray "========================================="
         echoEnhance blue "配置管理 Xray Server"
 
+        # 读取脚本配置（若存在），并显示当前 Xray 版本
+        local current_xray_version=""
         if [ -f "${SCRIPT_CONFIG_PATH}" ]; then
-            SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")" # 存储从 config.json 读取的脚本配置
-            # local current_xray_version
-            # current_xray_version="$(jq -r '.xray.version' "${XRAY_COINFIG_PATH}config.json")"
-            # if [ -n "${current_xray_version}" ]; then
-            #     echoEnhance green "当前 Xray 版本：${current_xray_version}"
-            # fi
+            SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")" # 缓存脚本配置
+            current_xray_version="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.version // empty')"
+        fi
+        # 若脚本配置里没有，再退回 xray --version 实测
+        if [ -z "${current_xray_version}" ] && command -v xray &>/dev/null; then
+            current_xray_version="$(xray --version 2>/dev/null | head -n 1 | awk '{print $2}')"
+        fi
+        if [ -n "${current_xray_version}" ]; then
+            echoEnhance green "当前 Xray 版本：${current_xray_version}"
+        else
+            echoEnhance yellow "当前 Xray 版本：未安装"
         fi
 
         echoEnhance gray "========================================="
@@ -4533,11 +4312,6 @@ config_xray_server() {
 
         read -rp "请输入序号:" num
 
-        # if [ -d "${XRAY_COINFIG_PATH}" ]; then
-        #     wget -qO "${XRAY_CONFIG_MANAGER}" https://raw.githubusercontent.com/faintx/public/main/tools/xray_config_manager.sh
-        #     chmod a+x "${XRAY_CONFIG_MANAGER}"
-        # fi
-
         case "${num}" in
         1)
             install_xray_server
@@ -4549,13 +4323,13 @@ config_xray_server() {
             purge_xray_server
             ;;
         4)
-            handler_start
+            if command -v xray &>/dev/null; then handler_start; else _warn "Xray 未安装"; fi
             ;;
         5)
-            handler_stop
+            if command -v xray &>/dev/null; then handler_stop; else _warn "Xray 未安装"; fi
             ;;
         6)
-            handler_restart
+            if command -v xray &>/dev/null; then handler_restart; else _warn "Xray 未安装"; fi
             ;;
         7)
             edit_xray_config
@@ -4564,11 +4338,25 @@ config_xray_server() {
             show_xray_config
             ;;
         9)
-            [[ -f "${XRAY_CONFIG_MANAGER}traffic.sh" ]] || wget -O "${XRAY_CONFIG_MANAGER}traffic.sh" https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
-            bash "${XRAY_CONFIG_MANAGER}traffic.sh"
+            if ! command -v xray &>/dev/null; then
+                _warn "Xray 未安装，无法统计流量"
+            else
+                # 缓存到脚本自有目录 SCRIPT_CONFIG_DIR/tools/，不再引用已废弃的老路径
+                mkdir -p "${SCRIPT_CONFIG_DIR}/tools"
+                local traffic_sh="${SCRIPT_CONFIG_DIR}/tools/traffic.sh"
+                if [[ ! -f "${traffic_sh}" ]]; then
+                    wget -O "${traffic_sh}" https://raw.githubusercontent.com/faintx/public/main/tools/traffic.sh
+                    chmod +x "${traffic_sh}"
+                fi
+                bash "${traffic_sh}"
+            fi
             ;;
         11)
-            systemctl status xray
+            if command -v xray &>/dev/null; then
+                systemctl status xray --no-pager
+            else
+                _warn "Xray 未安装"
+            fi
             ;;
         0)
             break

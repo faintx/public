@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="2.0.4"
+shell_version="2.0.5"
 
 declare -A osInfo
 
@@ -333,12 +333,13 @@ update_shell() {
         read -rp "(默认:y):" yn
         [[ -z "${yn}" ]] && yn="y"
         if [[ ${yn} == [Yy] ]]; then
-            curl -o sysset.sh https://raw.githubusercontent.com/faintx/public/refs/heads/main/sysset.sh && chmod +x sysset.sh
+            # 先写临时文件再 mv 原子替换，避免就地覆盖导致正在 source/执行此脚本的 bash 流式读到错位字节
+            curl -o sysset.sh.new https://raw.githubusercontent.com/faintx/public/refs/heads/main/sysset.sh && mv sysset.sh.new sysset.sh && chmod +x sysset.sh
             _info "脚本已更新为最新版本[ ${sh_new_ver} ]！"
             echo "3s后执行新脚本..."
             sleep 3s
             is_close=true
-            bash sysset.sh
+            exec bash sysset.sh
         else
             _info "已取消..."
         fi

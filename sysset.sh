@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="2.0.3"
+shell_version="2.0.4"
 
 declare -A osInfo
 
@@ -30,16 +30,16 @@ initEnvironment() {
     VLMCSD_SERVICE_FILE="/etc/systemd/system/vlmcsd.service"
 
     # config manager
-    # readonly XRAY_SERVER_PATH="/usr/local/etc/xray/"
-    : "${XRAY_SERVER_PATH:="/usr/local/etc/xray/"}"
+    # 用 guard 包住所有 readonly 常量，避免在同一 shell 里重复 source（例如
+    # update_shell 之后再次 source）时触发 "readonly variable" 报错
+    if [[ -z "${_SYSSET_READONLY_INIT:-}" ]]; then
+        XRAY_SERVER_PATH="/usr/local/etc/xray/"
     readonly XRAY_SERVER_PATH
 
-    # readonly XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
-    : "${XRAY_COINFIG_PATH:="/usr/local/etc/xray-script/"}"
+        XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
     readonly XRAY_COINFIG_PATH
 
-    # readonly XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
-    : "${XRAY_CONFIG_MANAGER:="${XRAY_COINFIG_PATH}xray_config_manager.sh"}"
+        XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
     readonly XRAY_CONFIG_MANAGER
 
     # 定义配置文件和相关目录的路径
@@ -59,6 +59,9 @@ initEnvironment() {
     readonly HEX_REGEX='^[0-9a-fA-F]+$'                                                                         # 十六进制字符串
     readonly UUID_REGEX='^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$' # UUID
     #readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'                                     # 邮箱地址
+
+        readonly _SYSSET_READONLY_INIT=1
+    fi
 
     XTLS_CONFIG="Vision"
 

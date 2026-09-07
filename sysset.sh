@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shell_version="2.0.5"
+shell_version="2.0.6"
 
 declare -A osInfo
 
@@ -36,12 +36,6 @@ initEnvironment() {
         XRAY_SERVER_PATH="/usr/local/etc/xray/"
     readonly XRAY_SERVER_PATH
 
-        XRAY_COINFIG_PATH="/usr/local/etc/xray-script/"
-    readonly XRAY_COINFIG_PATH
-
-        XRAY_CONFIG_MANAGER="${XRAY_COINFIG_PATH}xray_config_manager.sh"
-    readonly XRAY_CONFIG_MANAGER
-
     # 定义配置文件和相关目录的路径
     SCRIPT_CONFIG_DIR="${HOME}/.xray-script" # 主配置文件目录
     readonly SCRIPT_CONFIG_DIR
@@ -54,11 +48,8 @@ initEnvironment() {
     # --- 正则表达式常量 ---
     # 定义各种数据格式的正则表达式，用于验证输入
     readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$" # 域名
-    #readonly IPV4_REGEX='^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$' # IPv4
-    #readonly IPV6_REGEX='^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'                                            # IPv6 (简化版)
     readonly HEX_REGEX='^[0-9a-fA-F]+$'                                                                         # 十六进制字符串
     readonly UUID_REGEX='^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$' # UUID
-    #readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'                                     # 邮箱地址
 
         readonly _SYSSET_READONLY_INIT=1
     fi
@@ -220,10 +211,6 @@ check_root() {
 }
 
 check_systemctl() {
-    # if ! systemctl --version >/dev/null 2>&1; then
-    #     _error "系统未安装systemctl"
-    # fi
-
     # 检查 systemctl 是否存在
     if ! command -v systemctl &>/dev/null; then
         _info "systemctl 未安装，正在尝试安装..."
@@ -243,86 +230,11 @@ check_systemctl() {
             _error "不支持的发行版: ${osInfo[ID]}"
             ;;
         esac
-    # else
-    #     _info "检测到系统已安装 systemctl，跳过安装..."
     fi
 }
 check_os
 check_root
 check_systemctl
-
-function _systemctl() {
-    local cmd="$1"
-    local server_name="$2"
-    case "${cmd}" in
-    start)
-        _info "正在启动 ${server_name} 服务"
-        systemctl -q is-active "${server_name}" || systemctl -q start "${server_name}"
-        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
-        sleep 2
-
-        # systemctl -q is-active "${server_name}" && _info "已启动 ${server_name} 服务" || _error "${server_name} 启动失败"
-        if systemctl -q is-active "${server_name}"; then
-            _info "已启动 ${server_name} 服务"
-        else
-            _error "${server_name} 启动失败, 请检查日志"
-        fi
-        ;;
-    stop)
-        _info "正在暂停 ${server_name} 服务"
-        systemctl -q is-active "${server_name}" && systemctl -q stop "${server_name}"
-        systemctl -q is-enabled "${server_name}" && systemctl -q disable "${server_name}"
-        sleep 2
-
-        systemctl -q is-active "${server_name}" || _info "已暂停 ${server_name} 服务"
-        ;;
-    restart)
-        _info "正在重启 ${server_name} 服务"
-        # systemctl -q is-active "${server_name}" && systemctl -q restart "${server_name}" || systemctl -q start "${server_name}"
-        if systemctl -q is-active "${server_name}"; then
-            systemctl -q restart "${server_name}"
-        else
-            systemctl -q start "${server_name}"
-        fi
-
-        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
-        sleep 2
-
-        # systemctl -q is-active "${server_name}" && _info "已重启 ${server_name} 服务" || _error "${server_name} 启动失败"
-        if systemctl -q is-active "${server_name}"; then
-            _info "已重启 ${server_name} 服务"
-        else
-            _error "${server_name} 启动失败, 请检查日志"
-        fi
-        ;;
-    reload)
-        _info "正在重载 ${server_name} 服务"
-        # systemctl -q is-active "${server_name}" && systemctl -q reload "${server_name}" || systemctl -q start "${server_name}"
-        if systemctl -q is-active "${server_name}"; then
-            systemctl -q reload "${server_name}"
-        else
-            systemctl -q start "${server_name}"
-        fi
-
-        systemctl -q is-enabled "${server_name}" || systemctl -q enable "${server_name}"
-        sleep 2
-
-        systemctl -q is-active "${server_name}" && _info "已重载 ${server_name} 服务"
-        ;;
-    dr)
-        _info "正在重载 systemd 配置文件"
-        systemctl daemon-reload
-        ;;
-    esac
-}
-
-function _error_detect() {
-    local cmd="$1"
-    _info "${cmd}"
-    if ! eval "${cmd}"; then
-        _error "Execution command (${cmd}) failed, please check it and try again."
-    fi
-}
 
 update_shell() {
     _info "当前版本为 [ ${shell_version} ]，开始检测最新版本..."
@@ -628,7 +540,6 @@ set_aliyun_repo() {
     if [ -n "${osInfo[VERSION_ID]}" ]; then
         if [ "${osInfo[VERSION_ID]}" -eq 7 ]; then
             _info "开始切换 CentOS 7 源 ......"
-            # curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
             if curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo; then
                 yum clean all && yum makecache
             else
@@ -638,7 +549,6 @@ set_aliyun_repo() {
 
         elif [ "${osInfo[VERSION_ID]}" -eq 8 ]; then
             _info "开始切换 CentOS 8 源 ......"
-            # curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-vault-8.5.2111.repo
             if curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-vault-8.5.2111.repo; then
                 yum clean all && yum makecache
             else
@@ -651,15 +561,6 @@ set_aliyun_repo() {
             mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
         fi
 
-        # if [[ $? -eq 0 ]]; then
-        #     #mv CentOS-Linux-AppStream.repo CentOS-Linux-AppStream.repo.bak
-        #     #mv CentOS-Linux-BaseOS.repo CentOS-Linux-BaseOS.repo.bak
-        #     yum clean all && yum makecache
-        #     #yum update -y
-        # else
-        #     _warn "下载 repo 文件失败."
-        #     mv /etc/yum.repos.d/CentOS-Base.repo.backup /etc/yum.repos.d/CentOS-Base.repo
-        # fi
     fi
 }
 
@@ -810,8 +711,6 @@ disable_SELinux() {
         selinux_con=$(sed -n '/^SELINUX=/p' /etc/selinux/config)
         _info "SELinux 配置：${selinux_con}"
         if [[ "${selinux_con}" != "SELINUX=disabled" ]]; then
-            #sed -i 's/^SELINUX=/#SELINUX=/g' /etc/selinux/config
-            #echo "SELINUX=disabled" >>/etc/selinux/config
             sed -i "s/${selinux_con}/SELINUX=disabled/g" /etc/selinux/config
             _warn "SELinux 配置已关闭，需要重启生效."
             read -rp "是否现在重启系统?[Y/n]" is_reboot
@@ -880,13 +779,6 @@ config_ssh() {
         _info "SSH service already enabled."
     else
         _info "SSH service not enabled, enable it now..."
-        # systemctl enable sshd.service 2>/dev/null || systemctl enable ssh.service
-        # if [ $? -eq 0 ]; then
-        #     _info "SSH service successfully enabled."
-        # else
-        #     _warn "enable SSH service failed. please check."
-        #     return
-        # fi
         if systemctl enable sshd.service &>/dev/null || systemctl enable ssh.service &>/dev/null; then
             _info "SSH service successfully enabled."
         else
@@ -908,14 +800,10 @@ config_ssh() {
     read -rp "请输入 SSH 端口号(默认为:${read_config_ssh_port})(q退出):" SSH_PORT
     [[ ${SSH_PORT} == [Qq] ]] && return
     SSH_PORT=${SSH_PORT:-${read_config_ssh_port}}
-    # expr "${SSH_PORT}" + 0 &>/dev/null
     if [[ ! "${SSH_PORT}" =~ ^[0-9]+$ || "$SSH_PORT" -le 0 || "$SSH_PORT" -gt 65535 ]]; then
         _warn "输入了错误的端口:${SSH_PORT}" && echo
         return
     else
-        #sed -i "s/Port 22/Port ${sshport}/g" ${SSHConfig}
-        #sed -i '/^Port /s/^\(.*\)$/#\1/g' "$SSHConfig"
-        #echo -e "${Info}屏蔽原 SSH 端口成功 ！" && echo
 
         if grep -q "^Port " "${SSH_CONFIG}"; then
             current_port=${read_config_ssh_port}
@@ -1101,17 +989,8 @@ open_sysstem_proxy() {
     proxy_address="$1"
     proxy_protocol="${2}_proxy"
 
-    # # 检查是否已有 proxy 设置（包括被注释掉的情况）
-    # if grep -q "export ${proxy_protocol}=${proxy_address}" "${ETC_PROFILE}"; then
-    #     # 如果存在代理设置，去掉注释符号
-    #     sed -i "s|^#*\(export ${proxy_protocol}=${proxy_address}.*\)|\1|" "${ETC_PROFILE}"
-    #     # 更新代理地址
-    #     sed -i "s|^export ${proxy_protocol}=${proxy_address}.*|export ${proxy_protocol}=${proxy_address}|" "${ETC_PROFILE}"
-    # fi
-
     sed -i "/export ${proxy_protocol}=/d" "${ETC_PROFILE}"
 
-    # sed -i "/^unset ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
     sed -i "/unset ${proxy_protocol}/d" "${ETC_PROFILE}"
 
     # 添加新的设置
@@ -1124,20 +1003,8 @@ close_system_proxy() {
 
     proxy_protocol="${1}_proxy"
 
-    # sed -i "/^export ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
-
-    # # 检查是否已有 unset 设置（包括被注释掉的情况）
-    # if grep -q "unset ${proxy_protocol}" "${ETC_PROFILE}"; then
-    #     # 如果存在 unset 设置，去掉注释符号
-    #     sed -i "s|^#*\(unset ${proxy_protocol}.*\)|\1|" "${ETC_PROFILE}"
-    # else
-    #     # 如果没有 unset 设置，添加新的设置
-    #     echo "unset ${proxy_protocol}" >>"${ETC_PROFILE}"
-    # fi
-
     sed -i "/export ${proxy_protocol}=/d" "${ETC_PROFILE}"
 
-    # sed -i "/^unset ${proxy_protocol}/s/^/#/" "${ETC_PROFILE}"
     sed -i "/unset ${proxy_protocol}/d" "${ETC_PROFILE}"
 
     # 添加新的设置
@@ -1156,17 +1023,10 @@ do_system_proxy() {
         open_sysstem_proxy "${proxy_address}" "http"
         open_sysstem_proxy "${proxy_address}" "https"
         open_sysstem_proxy "${proxy_address}" "ftp"
-        # echo "http_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
-        # echo "https_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
-        # echo "ftp_proxy=http://127.0.0.1:7890" >>"${ETC_PROFILE}"
     elif [[ "${proxy_action}" == "off" ]]; then
         close_system_proxy "http"
         close_system_proxy "https"
         close_system_proxy "ftp"
-        # _info "删除 ${ETC_PROFILE} 全局代理配置..."
-        # sed -i '/http_proxy/d' "${ETC_PROFILE}"
-        # sed -i '/https_proxy/d' "${ETC_PROFILE}"
-        # sed -i '/ftp_proxy/d' "${ETC_PROFILE}"
     else
         _warn "不支持的操作:${proxy_action}"
     fi
@@ -1452,9 +1312,6 @@ check_python() {
         _info "已安装的 Python 版本: $version"
 
         # 比较版本
-        # if [[ $(echo "$version < 3.9.9" | bc -l) -eq 1 ]]; then
-        # if [[ $(printf '%s\n' "$version" "3.9.9" | sort -V | head -n1) == "$version" ]]; then
-        # if [[ "$version" < "3.9.9" ]]; then
         if printf "%s\n%s" "$version" "3.9.9" | sort -V | head -n 1 | grep -q "^$version$"; then
             _info "Python 版本小于 3.9.9，需要安装高版本 Python。"
             return 1
@@ -1610,10 +1467,6 @@ install_fail2ban() {
                     _warn "PYTHONPATH 未设置，找不到 /python3.*/site-packages/fail2ban/ 目录，请确认 fail2ban 是否安装正确。"
                 fi
 
-                # f2b_con=$(sed -n "/^ExecStart=/p" "${FAIL2BAN_DIR}build/fail2ban.service" | awk -F"=" '{ print $2 }')
-                # f2b_path=${f2b_con%/*}
-                # ln -fs "${f2b_path}/fail2ban-server" /usr/bin/fail2ban-server
-                # ln -fs "${f2b_path}/fail2ban-client" /usr/bin/fail2ban-client
 
                 _warn "Fail2Ban 安装完成!首次运行前需要修改配置才能正常使用。"
             else
@@ -1630,10 +1483,6 @@ install_fail2ban() {
     fi
 
     JAIL_FILE="/etc/fail2ban/jail.local"
-    # if [ -f "$JAIL_FILE" ]; then
-    #     return
-    # fi
-
     # 询问是否修改 Fail2Ban 配置
     read -rp "Fail2Ban 已安装，是否修改配置(Y/n):" yn
     yn=${yn:-Y}
@@ -1663,7 +1512,6 @@ backend = systemd
             systemctl daemon-reload
             systemctl enable fail2ban
             systemctl restart fail2ban
-            # systemctl restart rsyslog
         fi
     else
         _info "已取消 Fail2Ban 配置..."
@@ -1744,7 +1592,6 @@ update_fail2ban() {
         if [ ! -d "${FAIL2BAN_DIR}" ]; then
             _warn "找不到 Fail2Ban 目录，无法更新。"
         else
-            # pushd "${FAIL2BAN_DIR}" || _warn "进入目录 ${FAIL2BAN_DIR} 失败!" && return
             if ! pushd "${FAIL2BAN_DIR}"; then
                 _warn "进入目录 ${FAIL2BAN_DIR} 失败!"
                 return
@@ -1886,9 +1733,6 @@ system_config() {
 
 check_kms_server() {
 
-    # if ! command -v $KMS_SERVER_FILE &>/dev/null; then
-    #     return 1
-    # fi
 
     if [ -f "${KMS_SERVER_FILE}" ]; then
         _info "KMS Server 已安装！"
@@ -2217,64 +2061,6 @@ config_kms_server() {
 
     done
 
-}
-
-function _print_list() {
-    local p_list=("$@")
-    for ((i = 1; i <= ${#p_list[@]}; i++)); do
-        hint="${p_list[$i - 1]}"
-        echo -e "${GREEN}${i}${NC}) ${hint}"
-    done
-}
-
-function _is_digit() {
-    local input=${1}
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-function _is_tlsv1_3_h2() {
-
-    local check_url
-    check_url=$(echo "$1" | grep -oE '[^/]+(\.[^/]+)+\b' | head -n 1)
-
-    local check_num
-    check_num=$(echo QUIT | stdbuf -oL openssl s_client -connect "${check_url}:443" -tls1_3 -alpn h2 2>&1 | grep -Eoi '(TLSv1.3)|(^ALPN\s+protocol:\s+h2$)|(X25519)' | sort -u | wc -l)
-    if [[ ${check_num} -eq 3 ]]; then
-        return 0
-    else
-        return 1
-    fi
-
-}
-
-function _version_ge() {
-    test "$(echo "$@" | tr ' ' '\n' | sort -rV | head -n 1)" == "$1"
-}
-
-function select_data() {
-    # shellcheck disable=SC2207
-    local data_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${1}"))
-    # shellcheck disable=SC2207
-    local index_list=($(awk -v FS=',' '{for (i=1; i<=NF; i++) arr[i]=$i} END{for (i in arr) print arr[i]}' <<<"${2}"))
-    local result_list=()
-    if [[ ${#index_list[@]} -ne 0 ]]; then
-        for i in "${index_list[@]}"; do
-            if _is_digit "${i}" && [ "${i}" -ge 1 ] && [ "${i}" -le ${#data_list[@]} ]; then
-                i=$((i - 1))
-                result_list+=("${data_list[${i}]}")
-            fi
-        done
-    else
-        result_list=("${data_list[@]}")
-    fi
-    if [[ ${#result_list[@]} -eq 0 ]]; then
-        result_list=("${data_list[@]}")
-    fi
-    echo "${result_list[@]}"
 }
 
 check_xray_dependencies() {
@@ -2711,7 +2497,6 @@ function read_input() {
 
 function exec_read() {
     local opt="$1" # 获取配置项名称
-    local read_result
 
     case "${opt}" in
     block-bt)
@@ -3082,14 +2867,9 @@ function handler_script_config() {
     # 获取或生成 UUID
     local XRAY_UUID
     XRAY_UUID="$(generate_uuid "${CONFIG_DATA['uuid']}")"
-    # 获取或生成 Fallback UUID
-    local FALLBACK_UUID
-    FALLBACK_UUID="${CONFIG_DATA['fallback']:-$(generate_uuid)}"
     # 获取或生成 Trojan 密码
     local TROJAN_PASSWORD
     TROJAN_PASSWORD="${CONFIG_DATA['password']:-$(generate_password)}"
-    # 获取或生成 mKCP Seed
-    local KCP_SEED="${CONFIG_DATA['seed']:-$(generate_password)}"
     # 获取或生成 XHTTP 路径
     local XHTTP_PATH
     XHTTP_PATH="${CONFIG_DATA['path']:-$(generate_path)}"
@@ -3099,13 +2879,9 @@ function handler_script_config() {
     # 生成服务器名称列表
     local SERVER_NAMES
     SERVER_NAMES="$(generate_server_names "${TARGET_DOMAIN}")"
-    # 获取 CDN 域名
-    # local CDN_DOMAIN="${CONFIG_DATA['cdn']}"
     # 获取或生成 Short IDs
     local SHORT_IDS
     SHORT_IDS="$(generate_short_ids "${CONFIG_DATA['short_ids']:-8 8}")"
-    # 获取 CA 邮箱
-    # local CA_EMAIL="${CONFIG_DATA['email']}"
 
     # 更新脚本配置中的 block bt 状态
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg bt "${XRAY_RULES_BT,,}" ' if $bt != "n" then .xray.rules.bt = 1 else .xray.rules.bt = 0 end ')"
@@ -3125,26 +2901,6 @@ function handler_script_config() {
         SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${XRAY_UUID}" '.xray.uuid = $uuid')"
         ;;
     esac
-    # 根据配置标签更新特定字段 (第二部分)
-    # case "${CONFIG_TAG,,}" in
-    # fallback)
-    #     # 更新 Fallback UUID
-    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.xray.fallback = $uuid')"
-    #     ;;
-    # mkcp)
-    #     # 为 mKCP 生成随机端口并更新 Seed
-    #     XRAY_PORT="$(exec_generate '--port')"
-    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg seed "${KCP_SEED}" '.xray.kcp = $seed')"
-    #     ;;
-    # sni)
-    #     # 更新 Fallback UUID
-    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.xray.fallback = $uuid')"
-    #     # 为 SNI 更新 CA 邮箱、域名和 CDN
-    #     [[ -n "${CA_EMAIL}" ]] && SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg ca "${CA_EMAIL}" '.nginx.ca = $ca')"
-    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg domain "${TARGET_DOMAIN}" '.nginx.domain = $domain')"
-    #     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg cdn "${CDN_DOMAIN}" '.nginx.cdn = $cdn')"
-    #     ;;
-    # esac
     # 根据配置标签更新特定字段 (第三部分)
     case "${CONFIG_TAG,,}" in
     xhttp | trojan | fallback | sni)
@@ -3182,21 +2938,12 @@ function handler_script_config() {
 # 返回值: 无 (通过调用外部脚本执行安装)
 # =============================================================================
 function handler_install() {
-    # local xray_version="$1"       # 获取版本参数
     local force_install="${2:-n}" # 获取强制安装参数，默认为 'n'
-
-    # # 如果提供了版本参数，则处理版本配置
-    # if [[ -n "${xray_version}" ]]; then
-    #     handler_xray_version "${xray_version}"
-    # else
-    #     # 否则从脚本配置中读取版本
-    #     CONFIG_DATA['version']="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.version')"
-    # fi
 
     # 检查 Xray 命令是否存在，或是否强制安装
     if ! cmd_exists 'xray' || [[ "${force_install}" != n ]]; then
         # 调用 Xray-install 脚本进行安装
-        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root #--version "${CONFIG_DATA['version']}"
+        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u root
     fi
 }
 
@@ -3238,7 +2985,6 @@ function generate_x25519() {
 # =============================================================================
 function handler_x25519_config() {
     # 打印绿色的配置更新提示
-    # echo -e "${GREEN}[$(echo "$I18N_DATA" | jq -r '.title.config')]${NC} $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.script.config_update")" >&2
     _info "正在更新脚本配置 ..."
 
     # 生成 X25519 密钥对
@@ -3254,10 +3000,6 @@ function handler_x25519_config() {
     local HASH32
     HASH32="$(echo "${X25519}" | awk -F, '{print $3}')"
 
-    # 输出显示 x25519 密钥对
-    # echo -e "${GREEN}[Private Key]${NC} "${PRIVATE_KEY}"" >&2
-    # echo -e "${GREEN}[Public Key]${NC} "${PUBLIC_KEY}"" >&2
-    # echo -e "${GREEN}[Hash32]${NC} "${HASH32}"" >&2
     _info "Private Key: ${PRIVATE_KEY}"
     _info "Public Key: ${PUBLIC_KEY}"
     _info "Hash32: ${HASH32}"
@@ -3369,7 +3111,6 @@ function add_rule() {
 # =============================================================================
 function handler_xray_config() {
     # 打印绿色的 Xray 配置更新提示
-    # echo -e "${GREEN}[$(echo "$I18N_DATA" | jq -r '.title.config')]${NC} $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.xray.config_update")" >&2
     _info "正在更新 Xray 配置 ..."
 
     # 从脚本配置中读取各项参数
@@ -3536,13 +3277,6 @@ function get_share_link_component() {
     # 生成 VLESS 协议基础链接部分 (协议://UUID@地址:端口?网络类型=...)
     SHARE_LINK_COMPONENT_VLESS="${CLIENT_CONFIG[protocol]}://${CLIENT_CONFIG[uuid]}@${CLIENT_CONFIG[remote_host]}:${CLIENT_CONFIG[port]}?type=${CLIENT_CONFIG[type]}"
 
-    # # 生成 Trojan 协议基础链接部分 (协议://密码@地址:端口?网络类型=...)
-    # SHARE_LINK_COMPONENT_TROJAN="${CLIENT_CONFIG[protocol]}://${CLIENT_CONFIG[password]}@${CLIENT_CONFIG[remote_host]}:${CLIENT_CONFIG[port]}?type=${CLIENT_CONFIG[type]}"
-    # # 生成 mKCP 网络传输参数部分 (&seed=...)
-    # SHARE_LINK_COMPONENT_MKCP="&seed=${CLIENT_CONFIG[seed]}"
-    # # 生成 TLS 安全传输参数部分 (&security=tls&sni=...&alpn=h2&fp=chrome)
-    # SHARE_LINK_COMPONENT_TLS="&security=${CLIENT_CONFIG[security]}&sni=${CLIENT_CONFIG[server_name]}&alpn=h2&fp=chrome"
-
     # 生成 Reality 安全传输参数部分 (&security=reality&sni=...&pbk=...&sid=...&spx=%2F&fp=chrome)
     SHARE_LINK_COMPONENT_REALITY="&security=${CLIENT_CONFIG[security]}&sni=${CLIENT_CONFIG[server_name]}&pbk=${CLIENT_CONFIG[public_key]}&sid=${CLIENT_CONFIG[short_id]}&spx=%2F&fp=chrome"
     # 生成 XHTTP 网络传输路径参数部分 (&path=...), 注意去除路径开头的 '/'
@@ -3550,15 +3284,12 @@ function get_share_link_component() {
     # 生成 Flow 控制参数部分 (&flow=...)
     SHARE_LINK_COMPONENT_FLOW="&flow=${CLIENT_CONFIG[flow]}"
 
-    # # 生成额外参数部分 (&extra=...), 使用之前编码好的 XHTTP_EXTRA_ENCODED
-    # SHARE_LINK_COMPONENT_EXTRA="&extra=${XHTTP_EXTRA_ENCODED}"
-
 }
 
 # =============================================================================
 # 函数名称: get_xhttp_share_link
 # 功能描述: 为 XHTTP + Reality 网络传输类型生成完整的分享链接。
-# 参数: 无 (直接使用全局变量 CLIENT_CONFIG 和 XHTTP_EXTRA)
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG)
 # 返回值: 无 (直接修改全局变量 SHARE_LINK)
 # =============================================================================
 function get_xhttp_share_link() {
@@ -3611,9 +3342,9 @@ EOF
 
 # =============================================================================
 # 函数名称: show_config
-# 功能描述: 打印完整的客户端配置信息、额外配置 (如果有的话)、
+# 功能描述: 打印完整的客户端配置信息、
 #           最终的分享链接以及对应的二维码。
-# 参数: 无 (直接使用全局变量 CLIENT_CONFIG, XHTTP_EXTRA, SHARE_LINK, I18N_DATA)
+# 参数: 无 (直接使用全局变量 CLIENT_CONFIG, SHARE_LINK)
 # 返回值: 无 (直接打印到标准输出)
 # =============================================================================
 function show_config() {
@@ -3622,13 +3353,6 @@ function show_config() {
 
     # 显示客户端配置信息
     show_client_config
-
-    # 如果存在额外配置 (XHTTP_EXTRA)，则显示它
-    # if [[ "${XHTTP_EXTRA}" ]]; then
-    #     echo -e "------------------ $(echo "$I18N_DATA" | jq -r ".${CUR_FILE}.extra") ------------------"
-    #     # 使用 jq 格式化输出额外配置的 JSON
-    #     echo "${XHTTP_EXTRA}" | jq -r '.'
-    # fi
 
     # 显示分享链接
     echo -e "------------------ 分享链接 ------------------"
@@ -3646,7 +3370,7 @@ function show_config() {
 # 函数名称: share_xray_link
 # 功能描述: 生成 Xray 服务的客户端配置信息和分享链接 (如 VLESS, Trojan)。
 #           根据服务端配置 (Xray 和 Script) 自动提取必要参数，
-#           构造多种类型的分享链接 (包括 Reality, XHTTP, mKCP, TLS 等)，
+#           构造 Reality、XHTTP 类型的分享链接，
 #           并可选地生成二维码。
 # 参数: 无
 # 返回值: 无 (通过 systemctl 命令执行操作)
@@ -3661,11 +3385,7 @@ function share_xray_link() {
 
     # 根据脚本配置中的 tag (转换为小写) 选择不同的处理分支
     case "$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.tag | ascii_downcase')" in
-    # mkcp) get_mkcp_share_link ;;      # mKCP 模式
     xhttp) get_xhttp_share_link ;; # XHTTP 模式
-    # trojan) get_trojan_share_link ;;  # Trojan 模式
-    # fallback) show_fallback_config ;; # Fallback 模式
-    # sni) show_sni_config ;;           # SNI 模式
     *) get_vision_share_link ;; # 默认为 Vision 模式
     esac
 
@@ -3729,8 +3449,42 @@ Xray_normal_install() {
 
     handler_restart
 
+    setup_geodata_update
+
     share_xray_link
 
+}
+
+# =============================================================================
+# 函数名称: setup_geodata_update
+# 功能描述: 下载 geodata.sh，立即执行一次，并设置每天 06:30 自动更新 geodata。
+# 参数: 无
+# 返回值: 下载或定时任务配置失败时返回 1
+# =============================================================================
+setup_geodata_update() {
+    local geodata_dir="${SCRIPT_CONFIG_DIR}/tools"
+    local geodata_script="${geodata_dir}/geodata.sh"
+
+    mkdir -p "${geodata_dir}"
+    if ! wget -q -O "${geodata_script}" https://raw.githubusercontent.com/faintx/public/main/tools/geodata.sh || [[ ! -s "${geodata_script}" ]]; then
+        _warn "geodata.sh 下载失败，geodata 自动更新未配置"
+        rm -f "${geodata_script}"
+        return 1
+    fi
+    chmod +x "${geodata_script}"
+
+    # 安装完成后立即更新一次（用 Loyalsoldier 数据替换官方脚本自带的 v2fly 数据；失败仅警告，不中断安装流程）
+    if ! bash "${geodata_script}"; then
+        _warn "geodata 首次更新失败，可稍后手动执行: bash ${geodata_script}"
+    fi
+
+    # 幂等添加 crontab：按脚本绝对路径判断是否已存在，避免重复添加
+    if crontab -l 2>/dev/null | grep -qF "${geodata_script}"; then
+        _info "geodata 自动更新任务已存在"
+    else
+        (crontab -l 2>/dev/null; echo "30 6 * * * /bin/bash '${geodata_script}' >> '${geodata_dir}/geodata.log' 2>&1") | crontab - && \
+            _info "已设置每天 06:30 自动更新 geodata" || _warn "geodata 定时任务写入失败"
+    fi
 }
 
 # ===========================================================================
@@ -3824,6 +3578,8 @@ Xray_quick_install() {
     handler_xray_config
     handler_restart
 
+    setup_geodata_update
+
     # 分享链接（其内部三个 read -rp 保持不变，回车即全选，与 normal 一致）
     share_xray_link
 }
@@ -3859,36 +3615,10 @@ install_xray_server() {
 
     fi
 
-    # # 从脚本配置文件中读取已记录的安装路径
-    # local script_path
-    # script_path="$(jq -r '.path' "${SCRIPT_CONFIG_PATH}")"
-    # # 如果配置文件中没有记录路径，且命令行也未指定，则使用默认路径
-    # if [[ -z "${script_path}" && -z "${PROJECT_ROOT}" ]]; then
-    #     PROJECT_ROOT='/usr/local/xray-script' # 设置默认项目根目录
-    #     # 将默认路径更新到脚本配置文件中
-    #     SCRIPT_CONFIG="$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}")"
-    #     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
-
-    # # 如果配置文件中已有记录的路径，则使用该路径
-    # elif [[ -n "${script_path}" ]]; then
-    #     PROJECT_ROOT="${script_path}"
-
-    # fi
-
-    # # 检查项目根目录是否存在
-    # if [[ -d "${PROJECT_ROOT}" ]]; then
-    #     # 如果存在，则检查版本更新
-    #     check_xray_script_version
-    # else
-    #     # 如果不存在，则下载项目文件
-    #     download_xray_script_files "${PROJECT_ROOT}"
-    # fi
-
     # 获取最新的 release 版本
     CONFIG_DATA['version']="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')"
 
     # 更新脚本配置中的 Xray 版本
-    # SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg xray "${CONFIG_DATA['version']}" '.xray.version = $xray')"
     SCRIPT_CONFIG="$(jq --arg xray "${CONFIG_DATA['version']}" '.xray.version = $xray' "${SCRIPT_CONFIG_PATH}")"
     # 将更新后的脚本配置写入文件
     echo "${SCRIPT_CONFIG}" >"${SCRIPT_CONFIG_PATH}" && sleep 2
@@ -3947,7 +3677,7 @@ install_xray_server() {
 }
 
 purge_xray_server() {
-    if ! command -v xray &>/dev/null && [[ ! -d "${SCRIPT_CONFIG_DIR}" && ! -d "${XRAY_SERVER_PATH}" && ! -d "${XRAY_COINFIG_PATH}" ]]; then
+    if ! command -v xray &>/dev/null && [[ ! -d "${SCRIPT_CONFIG_DIR}" && ! -d "${XRAY_SERVER_PATH}" ]]; then
         _warn "Xray 未安装，无需卸载"
         return 0
     fi
@@ -3958,9 +3688,12 @@ purge_xray_server() {
 
     _info "正在卸载 Xray"
 
-    # 移除老版本 update-dat.sh 的 crontab 条目（存量用户兼容）
+    # 移除 geodata 自动更新的 crontab 条目（按脚本绝对路径精确匹配，避免误删其他任务）
     if command -v crontab &>/dev/null; then
-        crontab -l 2>/dev/null | grep -v "/usr/local/etc/xray-script/update-dat.sh >/dev/null 2>&1" | crontab - 2>/dev/null || true
+        local geodata_script="${SCRIPT_CONFIG_DIR}/tools/geodata.sh"
+        if crontab -l 2>/dev/null | grep -qF "${geodata_script}"; then
+            crontab -l 2>/dev/null | grep -vF "${geodata_script}" | crontab - 2>/dev/null || true
+        fi
     fi
 
     # 停服 & 禁用
@@ -3975,12 +3708,6 @@ purge_xray_server() {
     # 兜底清理残留目录（官方脚本偶尔漏网）
     rm -rf /etc/systemd/system/xray.service /etc/systemd/system/xray@.service
     rm -rf /usr/local/bin/xray /usr/local/etc/xray /usr/local/share/xray /var/log/xray
-
-    # 还原存量用户的 sysctl 备份（老路径），再清理老脚本目录
-    if [[ -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" ]]; then
-        mv -f "${XRAY_COINFIG_PATH}sysctl.conf.bak" /etc/sysctl.conf && _info "已还原网络连接设置"
-    fi
-    rm -rf "${XRAY_COINFIG_PATH}"
 
     # 存量用户可能装过 cloudflare-warp docker，同步清理（与老卸载语义对齐）
     if command -v docker &>/dev/null; then
@@ -4375,8 +4102,6 @@ config_xray_server() {
 }
 
 start_menu() {
-    # clear
-
     while true; do
         [[ true = "${is_close}" ]] && break
 
@@ -4417,12 +4142,6 @@ start_menu() {
             ;;
         esac
     done
-
-    # 获取所有键和值
-    # echo "OS Information Details:"
-    # for key in "${!osInfo[@]}"; do
-    #     echo "$key: ${osInfo[$key]}"
-    # done
 
 }
 start_menu

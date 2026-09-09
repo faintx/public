@@ -48,6 +48,9 @@ sudo bash disable-ipv6-safe.sh
 
 [⬆ 返回目录](#目录)
 
+
 <a id="geodata"></a>
 ## 获取 geo 数据 geodata.sh
 
+
+[⬆ 返回目录](#目录)

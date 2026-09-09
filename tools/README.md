@@ -5,7 +5,8 @@
 
 <a id="disable-ipv6-safe"></a>
 ## 禁用 IPV6 disable-ipv6-safe.sh
-## 测试总结
+
+### 测试总结
 
 在容器里做了完整的实测(不是纸上谈兵),包括:
 
@@ -26,9 +27,12 @@
 
 **一个诚实的说明**:测试沙箱容器的网络命名空间本身就没有 IPv6(`/proc/sys/net/ipv6` 整个不存在),这和真实 VPS 环境不同,所以**无法在这里验证 `netplan apply`/`sysctl --system` 在真正有 IPv6 协议栈的机器上生效后的最终网络状态**。但这恰好帮忙在测试中发现并修复了两处真实的健壮性问题(netplan/sysctl 部分失败时不该让整个脚本崩溃),所以这个测试环境的局限性反而有价值。
 
-## 使用建议
+### 使用建议
 
 在重装系统后的**全新 Ubuntu VPS**上:
+```bash
+curl -L -O https://raw.githubusercontent.com/faintx/public/refs/heads/main/tools/disable-ipv6-safe.sh
+```
 
 先看看会做什么改动，不实际执行
 ```bash

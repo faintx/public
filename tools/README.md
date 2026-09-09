@@ -1,4 +1,10 @@
-# disable-ipv6-safe.sh
+
+# 目录
+- [disable-ipv6-safe](#disable-ipv6-safe)
+- [geodata](#geodata)
+
+<a id="disable-ipv6-safe"></a>
+## 禁用 IPV6 disable-ipv6-safe.sh
 ## 测试总结
 
 在容器里做了完整的实测(不是纸上谈兵),包括:
@@ -35,3 +41,9 @@ sudo bash disable-ipv6-safe.sh
 ```
 
 如果脚本提示"GRUB 配置已更新，需要重启”，执行 `reboot`；重启后建议再跑一次脚本本身做二次确认（此时应该全部显示"无需修改"/"未发现"，证明状态已经收敛），然后用 `ip -6 addr show scope global` 和 `curl -I https://github.com` 做最终验证。
+
+[⬆ 返回目录](#目录)
+
+<a id="geodata"></a>
+## 获取 geo 数据 geodata.sh
+
